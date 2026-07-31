@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > ### 🔀 MultiSpeaker 独立开发仓库
-> 本仓库从 [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite) 的 `multi-speaker-inference` 分支**完整分叉**，用于独立开发和优化**多说话人（MultiSpeakerTTS）共享骨干推理**。
+> 本仓库源自 [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite) 的 fork：上游仓库并无 `multi-speaker-inference` 分支，该分支在 fork 中创建后独立为本仓库，专注多说话人（MultiSpeakerTTS）共享骨干推理的独立开发与优化。
 >
 > - **上游主仓库**：[chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite)（PyPI 发版 `gsv-tts-lite`）
 > - 多说话人功能**尚未发布至 PyPI**，本仓库是唯一来源；上游 bug 修复可通过 cherry-pick / merge 同步到本仓库

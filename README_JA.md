@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > ### 🔀 MultiSpeaker 独立開発リポジトリ
-> 本リポジトリは [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite) の `multi-speaker-inference` ブランチから**完全フォーク**したもので、**マルチスピーカー（MultiSpeakerTTS）共有骨格推論**の独立開発・最適化を目的としています。
+> 本リポジトリは [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite) のフォークに由来します：上流リポジトリに `multi-speaker-inference` ブランチは存在せず、フォーク内で作成された後に独立して本リポジトリとなり、**マルチスピーカー（MultiSpeakerTTS）共有骨格推論**の独立開発・最適化に特化しています。
 >
 > - **上流リポジトリ**：[chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite)（PyPI では `gsv-tts-lite` として公開）
 > - マルチスピーカー機能は**まだ PyPI に公開されていません**。本リポジトリが唯一のソースです。上流のバグ修正は cherry-pick / merge で同期できます

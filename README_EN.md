@@ -2,7 +2,7 @@
 
 > [!IMPORTANT]
 > ### 🔀 Standalone MultiSpeaker Development Fork
-> This repository is a **full fork** of the `multi-speaker-inference` branch of [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite), dedicated to independently developing and optimizing **multi-speaker (MultiSpeakerTTS) shared-backbone inference**.
+> This repository originates from a fork of [GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite): the upstream repo has no `multi-speaker-inference` branch — it was created within the fork and later spun off into this standalone repository, focused on independently developing and optimizing **multi-speaker (MultiSpeakerTTS) shared-backbone inference**.
 >
 > - **Upstream repo**: [chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite) (published on PyPI as `gsv-tts-lite`)
 > - The multi-speaker features are **NOT yet published to PyPI** — this repo is the only source; upstream bug fixes can be synced via cherry-pick / merge
