@@ -111,6 +111,9 @@ class TTS:
         self.spectrogram_transform_dict = {}
         self.spk_audio_cache = {}
         self.prompt_audio_cache = {}
+        # 缓存文件的 (mtime, size) 指纹 —— 内容变化时自动失效重算
+        self._spk_audio_stat: dict[str, tuple] = {}
+        self._prompt_audio_stat: dict[str, tuple] = {}
 
         self.cnhubert_path = Path(self.models_dir) / "chinese-hubert-base"
         self.cnroberta_path = Path(self.models_dir) / "chinese-roberta-wwm-ext-large"
@@ -629,7 +632,7 @@ class TTS:
                           prompt_audio_texts, all_phones2, all_bert2, prompt_languages):
             (spk_path, prm_path, prm_text, phones2, bert2, prm_lang) = items
 
-            if prm_path not in self.prompt_audio_cache:
+            if not self._prompt_cache_valid(prm_path):
                 self.cache_prompt_audio(prompt_audio_paths=prm_path,
                                          prompt_audio_texts=prm_text,
                                          prompt_language=prm_lang)
@@ -642,13 +645,13 @@ class TTS:
                 wsum = sum(spk_path.values())
                 ge = None
                 for ap, w in spk_path.items():
-                    if (ap not in self.spk_audio_cache or
+                    if (not self._spk_cache_valid(ap) or
                             sovits_model not in self.spk_audio_cache[ap]["ge"]):
                         self.cache_spk_audio(ap, sovits_model=sovits_model)
                     gv = self.spk_audio_cache[ap]["ge"][sovits_model]
                     ge = gv * (w / wsum) if ge is None else ge + gv * (w / wsum)
             else:
-                if (spk_path not in self.spk_audio_cache or
+                if (not self._spk_cache_valid(spk_path) or
                         sovits_model not in self.spk_audio_cache[spk_path]["ge"]):
                     self.cache_spk_audio(spk_path, sovits_model=sovits_model)
                 ge = self.spk_audio_cache[spk_path]["ge"][sovits_model]
@@ -1321,7 +1324,7 @@ class TTS:
         if gpt_model not in self.gpt_models:
             self.load_gpt_model(gpt_model)
 
-        if prompt_audio_path not in self.prompt_audio_cache:
+        if not self._prompt_cache_valid(prompt_audio_path):
             self.cache_prompt_audio(prompt_audio_paths=prompt_audio_path, prompt_audio_texts=prompt_audio_text, prompt_language=prompt_language)
 
         prompt = self.prompt_audio_cache[prompt_audio_path]["prompt"]
@@ -1341,7 +1344,7 @@ class TTS:
 
             ge = None
             for audio_path, weight in spk_audio_path.items():
-                if (audio_path not in self.spk_audio_cache) or (sovits_model not in self.spk_audio_cache[audio_path]["ge"]):
+                if (not self._spk_cache_valid(audio_path)) or (sovits_model not in self.spk_audio_cache[audio_path]["ge"]):
                     self.cache_spk_audio(audio_path, sovits_model=sovits_model)
 
                 if ge is None:
@@ -1349,7 +1352,7 @@ class TTS:
                 else:
                     ge += self.spk_audio_cache[audio_path]["ge"][sovits_model] * (weight / weight_sum)
         else:
-            if (spk_audio_path not in self.spk_audio_cache) or (sovits_model not in self.spk_audio_cache[spk_audio_path]["ge"]):
+            if (not self._spk_cache_valid(spk_audio_path)) or (sovits_model not in self.spk_audio_cache[spk_audio_path]["ge"]):
                 self.cache_spk_audio(spk_audio_path, sovits_model=sovits_model)
 
             ge = self.spk_audio_cache[spk_audio_path]["ge"][sovits_model]
@@ -1380,13 +1383,13 @@ class TTS:
             if self.sv_model is None:
                 self.sv_model = ERes2Net(self.sv_path, self.tts_config)
 
-            if speaker1_audio in self.spk_audio_cache:
+            if self._spk_cache_valid(speaker1_audio):
                 sv_emb1 = self.spk_audio_cache[speaker1_audio]["sv_emb"]
             else:
                 _, audio_tensor = self._get_spec(model.hps, speaker1_audio)
                 sv_emb1 = self.sv_model.compute_embedding3(audio_tensor)
             
-            if speaker2_audio in self.spk_audio_cache:
+            if self._spk_cache_valid(speaker2_audio):
                 sv_emb2 = self.spk_audio_cache[speaker2_audio]["sv_emb"]
             else:
                 _, audio_tensor = self._get_spec(model.hps, speaker2_audio)
@@ -1499,6 +1502,24 @@ class TTS:
         return list(self.sovits_models.keys())
     
     @torch.inference_mode()
+    @staticmethod
+    def _file_stat(path: str):
+        """(mtime, size) fingerprint for local files; None for non-file keys
+        (URLs, synthetic cache keys)."""
+        try:
+            st = os.stat(path)
+            return (st.st_mtime, st.st_size)
+        except OSError:
+            return None
+
+    def _spk_cache_valid(self, path: str) -> bool:
+        """True if the speaker cache entry exists and the file hasn't changed on disk."""
+        return path in self.spk_audio_cache and self._spk_audio_stat.get(path) == self._file_stat(path)
+
+    def _prompt_cache_valid(self, path: str) -> bool:
+        """True if the prompt cache entry exists and the file hasn't changed on disk."""
+        return path in self.prompt_audio_cache and self._prompt_audio_stat.get(path) == self._file_stat(path)
+
     def cache_spk_audio(self, *spk_audio_paths: str, sovits_model:str=None):
         """
         Processes and caches speaker audio embeddings for voice cloning.
@@ -1524,15 +1545,18 @@ class TTS:
                 self.sv_model = ERes2Net(self.sv_path, self.tts_config)
 
             for spk_audio_path in spk_audio_paths:
-                refers, audio_tensor = self._get_spec(model.hps, spk_audio_path)
-                if spk_audio_path not in self.spk_audio_cache:
+                if not self._spk_cache_valid(spk_audio_path):
+                    logging.info(f'Speaker audio cache miss or stale (file changed), recomputing: {spk_audio_path}')
+                    refers, audio_tensor = self._get_spec(model.hps, spk_audio_path)
                     sv_emb = self.sv_model.compute_embedding3(audio_tensor)
                     ge = model.vq_model.get_ge(refers, sv_emb)
                     self.spk_audio_cache[spk_audio_path] = {
                         "ge": {sovits_model: ge},
                         "sv_emb": sv_emb,
                     }
+                    self._spk_audio_stat[spk_audio_path] = self._file_stat(spk_audio_path)
                 elif sovits_model not in self.spk_audio_cache[spk_audio_path]["ge"]:
+                    refers, audio_tensor = self._get_spec(model.hps, spk_audio_path)
                     ge = model.vq_model.get_ge(refers, self.spk_audio_cache[spk_audio_path]["sv_emb"])
                     self.spk_audio_cache[spk_audio_path]["ge"][sovits_model] = ge
                 logging.info(f'Cached speaker audio: {spk_audio_path}')
@@ -1575,6 +1599,10 @@ class TTS:
                         "Prompt audio text is empty. "
                         "Please provide the text transcription for the reference audio (风格参考音频对应文本)."
                     )
+                if self._prompt_cache_valid(prompt_audio_path):
+                    logging.info(f'Cached prompt audio (valid): {prompt_audio_path}')
+                    continue
+                logging.info(f'Prompt audio cache miss or stale (file changed), recomputing: {prompt_audio_path}')
                 prompt = self._get_prompt(self.cnhubert_model, model, prompt_audio_path)
                 phones1, _, bert1, _ = get_phones_and_bert(prompt_audio_text, self.tts_config, prompt_language)
                 self.prompt_audio_cache[prompt_audio_path] = {
@@ -1582,6 +1610,7 @@ class TTS:
                     "phones1": phones1,
                     "bert1": bert1,
                 }
+                self._prompt_audio_stat[prompt_audio_path] = self._file_stat(prompt_audio_path)
                 logging.info(f'Cached prompt audio: {prompt_audio_path}')
             
             if not self.always_load_cnhubert:
