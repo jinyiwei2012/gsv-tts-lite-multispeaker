@@ -1,307 +1,64 @@
-# GSV-TTS 异步功能使用说明
+# GSV-TTS-Lite API 服务文档
 
-## 📊 1. 测试同步 vs 异步性能
+本仓库提供三个 HTTP 服务 + 若干测试脚本，覆盖**单说话人**与**多说话人（MultiSpeakerTTS）**推理：
 
-运行测试脚本对比同步和异步的速度：
+| 文件 | 端口 | 说明 |
+| :--- | :---: | :--- |
+| `fastapi_server_example.py` | 8000 | 示例服务：单说话人 + 多说话人全套端点，含外链音频与 ASR |
+| `personal_api.py` | 9880 | 个人应用 API：兼容原版 GPT-SoVITS API 参数，支持流式/批量/模型热切换/多角色 |
+| `realtime_api.py` | 8080 | 实时音视频服务（aiohttp） |
+| `test_async_performance.py` | - | 同步 vs 异步性能对比测试 |
+| `test_url_audio.py` | - | 外链音频功能测试 |
+| `test_realtime_api.py` | - | 实时 API 测试 |
 
-```bash
-cd API
-python test_async_performance.py
-```
+> [!NOTE]
+> 多说话人功能未发布到 PyPI，`API/requirements.txt` 已通过 `-e ..` 自动安装本仓库的 `gsv_tts` 包，无需额外操作。
 
-## 🔧 2. 现在有的接口
-
-### 接口一：WebUI（原来的 Gradio 界面）
-
-- **位置**：`WebUI/web.py`
-- **启动方式**：
-  ```bash
-  cd WebUI
-  python web.py
-  ```
-- **用途**：图形化界面，适合本地调试和体验
-- **特点**：同步处理，适合单用户使用
-
-### 接口二：TTS 类的 Python API
-
-- **位置**：`gsv_tts/TTS.py`
-- **新增的异步方法**：
-  1. `infer_async()` - 单个异步请求（线程安全）
-  2. `infer_batched_async()` - 批量异步请求（线程安全）
-
-### 接口三：FastAPI 服务端 API
-
-- **位置**：`API/fastapi_server_example.py`
-- **启动方式**：
-  ```bash
-  cd API
-  python fastapi_server_example.py
-  ```
-- **用途**：RESTful API 服务，适合服务端部署
-- **特点**：异步处理，支持并发请求、外链音频、自动 ASR
-
-## 💡 3. 怎么使用异步功能
-
-### 方式一：直接使用 TTS 类
-
-```python
-import asyncio
-from gsv_tts import TTS
-
-tts = TTS(models_dir="WebUI/models")
-
-async def main():
-    # 单个异步请求
-    audio = await tts.infer_async(
-        spk_audio_path="examples/laffey.mp3",
-        prompt_audio_path="examples/AnAn.ogg",
-        prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
-        text="你好，这是测试。"
-    )
-    audio.save("output.wav")
-    
-    # 批量异步请求（推荐，GPU 利用率更高）
-    texts = ["第一个请求", "第二个请求", "第三个请求"]
-    audios = await tts.infer_batched_async(
-        spk_audio_paths="examples/laffey.mp3",
-        prompt_audio_paths="examples/AnAn.ogg",
-        prompt_audio_texts="ちが……ちがう。レイア、貴様は間違っている。",
-        texts=texts
-    )
-    for i, audio in enumerate(audios):
-        audio.save(f"output_{i}.wav")
-
-asyncio.run(main())
-```
-
-### 方式二：FastAPI 服务端（推荐部署）
-
-#### 1. 安装依赖
+## 🚀 快速开始
 
 ```bash
+# 1. 安装依赖（自动从仓库根安装本地 gsv_tts）
 cd API
 pip install -r requirements.txt
+
+# 2. 启动服务（任选其一）
+python fastapi_server_example.py   # 示例服务，端口 8000
+# python personal_api.py           # 个人 API，端口 9880（-p 可改）
+
+# 3. 浏览器打开交互式 API 文档
+# http://localhost:8000/docs   （personal_api 为 http://localhost:9880/docs）
 ```
 
-> **依赖说明**：`httpx` 用于下载外链音频。
+> 首次运行会自动下载预训练模型（数 GB）到 `~/.cache/gsv`；`personal_api.py` 默认下载到 `API/models`，可用 `--models_dir` 指定。下载慢可用环境变量 `GSV_MIRROR=modelscope` 强制镜像。
 
-#### 2. 启动服务
+## 🎯 多说话人端点（MultiSpeaker，核心）
 
-```bash
-cd API
-python fastapi_server_example.py
-```
-
-启动成功后会显示：
-
-```
-🚀 正在加载 TTS 模型...
-✅ TTS 模型加载完成！
-🚀 正在加载 ASR 模型...
-✅ ASR 模型加载完成！
-INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-```
-
-#### 3. 访问 API 文档
-
-浏览器打开：`http://localhost:8000/docs`
-
-#### 4. API 接口说明
-
-**单个 TTS 请求**：
-
-- **接口**：`POST /tts/single`
-- **请求参数**：
-  ```json
-  {
-    "text": "你好，这是测试。",
-    "speaker_audio": "examples/laffey.mp3",
-    "prompt_audio": "examples/AnAn.ogg",
-    "prompt_text": "ちが……ちがう。レイア、貴様は間違っている。",
-    "text_language": "auto",
-    "prompt_language": "auto",
-    "top_k": 5,
-    "top_p": 0.9,
-    "temperature": 1.0,
-    "repetition_penalty": 1.35,
-    "noise_scale": 0.5,
-    "speed": 1.0
-  }
-  ```
-  > **注意**：`prompt_text` 可选，如果不提供会自动使用 ASR 识别。`speaker_audio` 和 `prompt_audio` 支持本地路径或外链 URL。`text_language` / `prompt_language` 可选，支持 `"auto"` / `"ja"` / `"zh"` / `"en"`，默认自动检测；混语文本建议手动指定。
-
-- **响应示例**：
-  ```json
-  {
-    "success": true,
-    "audio_len": 1.72,
-    "filename": "tts_06a1a5fc.wav",
-    "prompt_text_used": "ちが……ちがう。レイア、貴様は間違っている。"
-  }
-  ```
-
-**批量 TTS 请求**：
-
-- **接口**：`POST /tts/batch`
-- **请求参数**：
-  ```json
-  {
-    "texts": ["第一个请求", "第二个请求"],
-    "speaker_audio": "examples/laffey.mp3",
-    "prompt_audio": "examples/AnAn.ogg",
-    "prompt_text": "ちが……ちがう。レイア、貴様は間違っている。",
-    "text_languages": "auto",
-    "prompt_languages": "auto"
-  }
-  ```
-  > `text_languages` / `prompt_languages` 支持单个字符串（全部相同）或逐句列表（`["ja", "zh"]`）。
-- **响应示例**：
-  ```json
-  {
-    "success": true,
-    "count": 2,
-    "filenames": ["tts_ca15dce7.wav", "tts_08c8418f.wav"],
-    "prompt_text_used": "ちが……ちがう。レイア、貴様は間違っている。"
-  }
-  ```
-
-**下载音频文件**：
-
-- **接口**：`GET /audio/{filename}`
-- **示例**：`http://localhost:8000/audio/tts_06a1a5fc.wav`
-
-## 🌐 4. 外链音频支持
-
-### 功能特性
-
-- ✅ `speaker_audio` 和 `prompt_audio` 支持本地路径或 HTTP/HTTPS URL
-- ✅ 自动下载外链音频到临时文件
-- ✅ 支持常见音频格式：mp3、wav、ogg、flac
-- ✅ `prompt_text` 参数可选，自动使用 ASR 识别
-- ✅ 响应中返回 `prompt_text_used` 字段，显示实际使用的文本
-
-### 环境变量
-
-- `USE_ASR=true`（默认）：启用 ASR 模型
-- `USE_ASR=false`：禁用 ASR 模型（需要手动提供 `prompt_text`）
-
-### 示例：使用外链音频
-
-**Python 请求示例**：
-
-```python
-import requests
-
-# 外链音频 URL
-PROMPT_AUDIO_URL = "https://example.com/prompt.mp3"
-
-response = requests.post(
-    "http://localhost:8000/tts/single",
-    json={
-        "text": "你好，这是外链音频测试。",
-        "speaker_audio": "examples/laffey.mp3",
-        "prompt_audio": PROMPT_AUDIO_URL
-        # 不需要 prompt_text，会自动 ASR 识别
-    },
-    timeout=120
-)
-
-print(response.json())
-# 输出: {"success": true, "audio_len": 4.08, "filename": "tts_xxx.wav", "prompt_text_used": "自动识别的文本"}
-```
-
-**curl 请求示例**：
-
-```bash
-curl -X POST "http://localhost:8000/tts/single" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "你好，这是外链音频测试。",
-    "speaker_audio": "examples/laffey.mp3",
-    "prompt_audio": "https://example.com/prompt.mp3"
-  }'
-```
-
-### 测试脚本
-
-```bash
-cd API
-python test_url_audio.py
-```
-
-## 📝 5. 技术细节
-
-### 线程安全
-
-- ✅ 已添加 `threading.Lock` 确保线程安全
-- ✅ 支持多线程并发请求
-- ✅ 避免了 `LangSegment` 静态变量的竞态条件
-
-### 性能对比
-
-- **同步逐个处理**：串行执行，适合少量请求
-- **异步批处理**：GPU 并行处理，适合批量请求，效率更高
-
-## 🔍 6. 常见问题
-
-### Q: 为什么 `infer_async` 不是真正的并行？
-
-A: 因为 `LangSegment` 类使用了静态变量，需要加锁保证线程安全，所以实际是串行执行的。
-
-### Q: 什么时候用 `infer_batched_async`？
-
-A: 当你有多个请求要处理时，用 `infer_batched_async` 可以真正利用 GPU 并行能力，速度更快。
-
-### Q: 服务端部署推荐哪种方式？
-
-A: 推荐使用 FastAPI 示例，它提供了完整的 RESTful API 接口。
-
-### Q: FastAPI 服务启动失败怎么办？
-
-A: 检查端口是否被占用，如果 8000 端口被占用，可以修改 `fastapi_server_example.py` 中的端口号。
-
-### Q: 如何修改 FastAPI 端口？
-
-A: 在 `fastapi_server_example.py` 中修改：
-
-```python
-uvicorn.run(app, host="0.0.0.0", port=8001)  # 改为其他端口
-```
-
-### Q: 外链音频下载失败怎么办？
-
-A: 检查 URL 是否可访问，确保网络连接正常。`httpx` 默认超时为 60 秒。
-
-### Q: ASR 识别不准确怎么办？
-
-A: 可以手动提供 `prompt_text` 参数，或者确保 `prompt_audio` 音质清晰。
-
-## 🎯 6.5. 多角色推理 API (Multi-Speaker) 🆕
-
-`MultiSpeakerTTS` 支持在同一服务中加载多个微调角色，共享模型骨干，显存节省 50-75%。
-
-### 接口列表
+两个 FastAPI 服务都提供同一套多角色管理端点（默认端口分别为 8000 / 9880）：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/multi-speaker/init` | 初始化多角色引擎 |
+| POST | `/multi-speaker/init` | 初始化多角色引擎（共享骨干） |
 | POST | `/multi-speaker/add` | 添加角色 |
 | POST | `/multi-speaker/remove` | 移除角色 |
 | GET  | `/multi-speaker/list` | 列出已加载角色 |
 | POST | `/multi-speaker/infer` | 单角色推理 |
 | POST | `/multi-speaker/batch` | 多角色批量推理 |
-| POST | `/multi-speaker/stream` | 单角色流式推理 (SSE) 🆕 |
+| POST | `/multi-speaker/stream` | 单角色流式推理 (SSE) |
 
-### 使用流程
+**使用流程**（以 8000 端口为例）：
 
-**1. 初始化引擎**
+**1. 初始化引擎**（可选，不调用则首次添加角色时自动初始化）
+
 ```bash
 curl -X POST "http://localhost:8000/multi-speaker/init" \
   -H "Content-Type: application/json" \
   -d '{"use_bert": true, "use_flash_attn": false}'
 ```
 
-**2. 添加角色**
+> `base_gpt_path` / `base_sovits_path` 可指定共享骨干模型路径，默认使用 `~/.cache/gsv` 下的默认模型。
+
+**2. 添加角色**（`speaker_audio` / `prompt_audio` 支持本地路径或 URL）
+
 ```bash
 curl -X POST "http://localhost:8000/multi-speaker/add" \
   -H "Content-Type: application/json" \
@@ -314,23 +71,26 @@ curl -X POST "http://localhost:8000/multi-speaker/add" \
     "prompt_text": "こんにちは、アリスです。"
   }'
 ```
-> 响应会返回 `mode`：`shared`（共享骨干）或 `full_model_degraded`（自动降级为完整模型）
+
+> 响应返回 `mode`：`shared`（共享骨干）或 `full_model_degraded`（架构不兼容时自动降级为完整模型，不影响其他角色）。
 
 **3. 查看已加载角色**
+
 ```bash
 curl "http://localhost:8000/multi-speaker/list"
 ```
+
 ```json
 {
   "initialized": true,
   "speakers": [
-    {"name": "alice", "mode": "shared", "gpt_keys": 25, "sovits_keys": 37},
-    {"name": "bob",   "mode": "full_model", "gpt_keys": 0, "sovits_keys": 0}
+    {"name": "alice", "mode": "shared", "gpt_keys": 25, "sovits_keys": 37}
   ]
 }
 ```
 
-**4. 单角色推理**
+**4. 单角色推理**（支持语言参数与**按次 prompt 覆盖**）
+
 ```bash
 curl -X POST "http://localhost:8000/multi-speaker/infer" \
   -H "Content-Type: application/json" \
@@ -343,10 +103,12 @@ curl -X POST "http://localhost:8000/multi-speaker/infer" \
     "prompt_audio_text": "別のスタイルのテキスト。"
   }'
 ```
-> `text_language` / `prompt_language` 可选，支持 `"auto"` / `"ja"` / `"zh"` / `"en"`。
-> `prompt_audio_path` / `prompt_audio_text` 可选，用于**按次覆盖**角色默认的风格参考音频（不传则使用添加角色时的配置）。
 
-**5. 多角色批量推理**
+> `text_language` / `prompt_language` 支持 `"auto"` / `"ja"` / `"zh"` / `"en"`（默认 `"auto"`）。
+> `prompt_audio_path` / `prompt_audio_text` 可选：不传则使用添加角色时配置的风格参考。
+
+**5. 多角色批量推理**（相同角色自动 GPU 并行，每条可独立指定语言与 prompt 覆盖）
+
 ```bash
 curl -X POST "http://localhost:8000/multi-speaker/batch" \
   -H "Content-Type: application/json" \
@@ -357,9 +119,9 @@ curl -X POST "http://localhost:8000/multi-speaker/batch" \
     ]
   }'
 ```
-> 相同角色自动 GPU 并行，不同角色按组分别批量处理。每条可独立指定 `text_language` / `prompt_language` / `prompt_audio_path` / `prompt_audio_text`，全部相同时也可省略（默认 `"auto"` / 不覆盖）。任一条目提供 prompt 覆盖时自动退化为逐条推理。
 
-**6. 单角色流式推理 (SSE)** 🆕
+**6. 单角色流式推理 (SSE)**（Token 级流式输出，低延迟实时反馈）
+
 ```bash
 curl -N -X POST "http://localhost:8000/multi-speaker/stream" \
   -H "Content-Type: application/json" \
@@ -371,7 +133,9 @@ curl -N -X POST "http://localhost:8000/multi-speaker/stream" \
     "overlap_len": 5
   }'
 ```
-返回格式与 `/tts/stream` 一致（Server-Sent Events）：
+
+SSE 事件格式：
+
 ```
 event: audio
 data: {"audio": "<base64>", "sample_rate": 32000, "duration": 0.5, "text": "..."}
@@ -382,45 +146,122 @@ data: {"total_duration": 5.2}
 event: error
 data: {"error": "错误信息"}
 ```
-> 基于 `MultiSpeakerTTS.infer_stream` 的 Token 级流式输出，共享骨干 + 角色权重单次注入，首包延迟与单模型流式一致。
 
-### 自动兼容性
+**自动兼容性**：加载角色时自动校验角色模型与骨干的架构参数（`vocab_size`、`n_layer`、`gin_channels`、`upsample_initial_channel` 等），不兼容的角色自动降级为完整模型加载，不中断其他角色。
 
-- 加载时自动校验角色模型与基模型的 13 个架构参数
-- 不兼容的角色**自动降级**为完整模型加载（~800MB VRAM），不影响其他角色
-- v2Pro 和 v2ProPlus 在结构参数匹配时互相兼容
+## 📖 服务一：fastapi_server_example.py（示例服务，端口 8000）
 
----
+**单说话人端点**：
 
-## 🎯 7. 最佳实践
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/tts/single` | 单句合成 |
+| POST | `/tts/batch` | 批量合成 |
+| GET  | `/audio/{filename}` | 下载生成的音频 |
+| POST | `/multi-speaker/*` | 多角色端点（见上） |
 
-1. **服务端部署**：使用 FastAPI 示例，提供 RESTful API
-2. **批量处理**：尽量使用 `infer_batched_async` 提高 GPU 利用率
-3. **预热模型**：在服务启动时预热模型，避免首次请求延迟
-4. **错误处理**：在生产环境中添加适当的错误处理
-5. **端口管理**：确保端口不被占用，必要时修改端口号
-6. **外链音频**：确保 URL 可访问，建议使用 CDN 加速
-
-## 🚀 8. 快速开始
-
-### 最简单的使用方式（FastAPI）
+**单句合成**：
 
 ```bash
-# 1. 安装依赖
-cd API
-pip install -r requirements.txt
-
-# 2. 启动服务
-python fastapi_server_example.py
-
-# 3. 打开浏览器访问 API 文档
-# http://localhost:8000/docs
-
-# 4. 测试性能
-python test_async_performance.py
-
-# 5. 测试外链音频
-python test_url_audio.py
+curl -X POST "http://localhost:8000/tts/single" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "你好，这是测试。",
+    "speaker_audio": "examples/laffey.mp3",
+    "prompt_audio": "examples/AnAn.ogg",
+    "prompt_text": "ちが……ちがう。レイア、貴様は間違っている。",
+    "text_language": "auto",
+    "prompt_language": "auto",
+    "top_k": 5,
+    "top_p": 0.9,
+    "temperature": 1.0,
+    "repetition_penalty": 1.35,
+    "noise_scale": 0.5,
+    "speed": 1.0
+  }'
 ```
 
-**推荐**：部署到服务端时使用 FastAPI 示例或 TTS 类的 `infer_async()` 方法！
+```json
+{
+  "success": true,
+  "audio_len": 1.72,
+  "filename": "tts_06a1a5fc.wav",
+  "prompt_text_used": "ちが……ちがう。レイア、貴様は間違っている。"
+}
+```
+
+> `prompt_text` 可选：不提供时自动用 ASR 识别。`speaker_audio` / `prompt_audio` 支持本地路径或 HTTP(S) URL。
+
+**批量合成**：
+
+```bash
+curl -X POST "http://localhost:8000/tts/batch" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "texts": ["第一句", "第二句"],
+    "speaker_audio": "examples/laffey.mp3",
+    "prompt_audio": "examples/AnAn.ogg",
+    "prompt_text": "ちが……ちがう。レイア、貴様は間違っている。",
+    "text_languages": "auto",
+    "prompt_languages": "auto"
+  }'
+```
+
+> `text_languages` / `prompt_languages` 支持单个字符串（全部相同）或逐句列表（`["ja", "zh"]`）。
+
+**下载音频**：`GET /audio/tts_06a1a5fc.wav`
+
+## 📖 服务二：personal_api.py（个人应用 API，端口 9880）
+
+> 详细文档见 [PERSONAL_API.md](PERSONAL_API.md)。启动参数：`-p/--port`（默认 9880）、`--models_dir`（默认 `models`）、`--use_asr`。
+
+**端点一览**：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/tts` | 兼容原版 GPT-SoVITS API 参数（v2 格式） |
+| POST | `/tts/stream` | 流式推理 (SSE) |
+| POST | `/tts/batched` | 批量推理 |
+| GET | `/set_gpt_weights` | 热切换 GPT 模型 |
+| GET | `/set_sovits_weights` | 热切换 SoVITS 模型 |
+| GET | `/audio/{filename}` | 下载生成的音频 |
+| POST | `/multi-speaker/*` | 多角色端点（见上） |
+
+**流式推理 `/tts/stream`**：SSE 实时推送，`stream_mode` 支持 `token`（低延迟，适合实时对话）与 `sentence`（更连贯，适合长文本）。
+
+**批量推理 `/tts/batched`**：一次请求生成多个音频，支持 `return_subtitles` 返回逐字时间戳。
+
+**模型热切换**：
+
+```bash
+curl "http://localhost:9880/set_gpt_weights?weights_path=models/new_gpt.ckpt"
+curl "http://localhost:9880/set_sovits_weights?weights_path=models/new_sovits.pth"
+```
+
+## 📖 服务三：realtime_api.py（实时音视频，端口 8080）
+
+基于 aiohttp 的实时音频服务，适合实时通话类场景（配合 WebRTC 等使用）。
+
+## 🌐 外链音频 & ASR
+
+- **外链音频**：所有 `speaker_audio` / `prompt_audio` 参数支持 HTTP(S) URL，服务自动下载到临时文件（支持 mp3/wav/ogg/flac）。
+- **ASR 自动识别**：`prompt_text` 不提供时自动用 ASR（Qwen3-ASR）识别参考音频文本。
+  - `fastapi_server_example.py`：环境变量 `USE_ASR=true`（默认）/ `USE_ASR=false`
+  - `personal_api.py`：启动参数 `--use_asr`
+
+## 🔍 常见问题
+
+**Q：服务启动失败？**
+检查端口是否被占用（`netstat -ano | findstr 8000`），或换端口：`personal_api.py -p 9881`；`fastapi_server_example.py` 需修改文件末尾的 `uvicorn.run(..., port=...)`。
+
+**Q：首次请求很慢？**
+首次运行会自动下载模型（数 GB）；模型懒加载，第一次推理会额外耗时（预热）。可先调用一次任意接口预热。
+
+**Q：外链音频下载失败？**
+确认 URL 可访问；`httpx` 默认超时 60 秒。
+
+**Q：ASR 识别不准？**
+手动提供 `prompt_text` 参数，或确保参考音频音质清晰。
+
+**Q：`/multi-speaker/add` 返回 `full_model_degraded`？**
+该角色模型与共享骨干架构不兼容，已自动降级为完整模型加载——功能正常，只是该角色不共享骨干、占用更多显存。建议将角色模型统一为 v2ProPlus 架构。

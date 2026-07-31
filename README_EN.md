@@ -144,8 +144,8 @@ tts.remove_speaker("bob")
 
 ```bash
 # 1. Install PyTorch (the deep-learning framework)
-#    With an NVIDIA GPU:
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#    With an NVIDIA GPU (China mirror; switch to https://download.pytorch.org/whl/cu128 if slow):
+pip install torch torchvision torchaudio --index-url https://mirrors.aliyun.com/pytorch-wheels/cu128
 #    Without a GPU (Mac / regular PC):
 #    pip install torch torchvision torchaudio
 

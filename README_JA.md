@@ -144,8 +144,8 @@ tts.remove_speaker("bob")
 
 ```bash
 # 1. PyTorch（ディープラーニングフレームワーク）をインストール
-#    NVIDIA GPU がある場合：
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#    NVIDIA GPU がある場合（中国国内ミラー。遅い場合は https://download.pytorch.org/whl/cu128 に変更）：
+pip install torch torchvision torchaudio --index-url https://mirrors.aliyun.com/pytorch-wheels/cu128
 #    GPU がない場合（Mac / 通常 PC）：
 #    pip install torch torchvision torchaudio
 

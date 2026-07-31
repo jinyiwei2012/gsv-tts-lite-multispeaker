@@ -144,8 +144,8 @@ tts.remove_speaker("bob")
 
 ```bash
 # 1. 安装 PyTorch（深度学习框架）
-#    有 NVIDIA 显卡：
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#    有 NVIDIA 显卡（国内镜像源，官方源慢可换 https://download.pytorch.org/whl/cu128）：
+pip install torch torchvision torchaudio --index-url https://mirrors.aliyun.com/pytorch-wheels/cu128
 #    没显卡（Mac / 普通电脑）：
 #    pip install torch torchvision torchaudio
 
