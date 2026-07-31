@@ -10,14 +10,10 @@
 </div>
 
 <div align="center">
-  <a href="Project_Link_Placeholder">
-    <img src="huiyeji.gif" alt="Logo" width="240" height="254">
-  </a>
-
-  <h1>GSV-TTS-Lite</h1>
+  <h1>GSV-TTS-Lite · MultiSpeaker</h1>
 
   <p>
-    A high-performance inference engine specifically designed for the GPT-SoVITS text-to-speech model
+    Multi-speaker shared-backbone inference engine for GPT-SoVITS (MultiSpeakerTTS)
   </p>
 
   <p align="center">
@@ -50,56 +46,32 @@
   </p>
 </div>
 
-<div align="center">
-  <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif">
-</div>
-
 ## About
 
-This project was born out of the pursuit of ultimate performance: on low-end devices such as the RTX 3050 (Laptop), the inference latency of the original GPT-SoVITS often struggled to meet the demands of real-time interaction.
+**GSV-TTS-Lite** is a high-performance inference engine based on **GPT-SoVITS (V2/V2Pro/V2ProPlus)**. Through deep optimizations such as CUDA Graph, Nested KV Cache, and Continuous Batching, it achieves millisecond-level real-time synthesis (3x~4x faster than the original with half the VRAM).
 
-**GSV-TTS-Lite** is a high-performance inference engine based on **GPT-SoVITS (V2/V2Pro/V2ProPlus)**, achieving millisecond-level real-time response in low-VRAM environments through deep optimizations such as CUDA Graph, Nested KV Cache, and Continuous Batching. Beyond raw performance, it also features **decoupling of timbre and style**, **character-level timestamp alignment**, **voice conversion (timbre transfer)**, and **speaker verification**.
-
-On top of that, this repository additionally provides **MultiSpeakerTTS multi-speaker shared-backbone inference**: one GPT+SoVITS backbone serves multiple fine-tuned speakers simultaneously, with each speaker injecting only ~5-15% lightweight per-speaker weights, saving **40%~75%** VRAM/memory.
+The core of this repository is **MultiSpeakerTTS multi-speaker shared-backbone inference**: **one** GPT+SoVITS backbone serves multiple fine-tuned speakers simultaneously, with each speaker injecting only ~5-15% lightweight per-speaker weights, saving **40%~75%** VRAM/memory — **the more speakers, the more you save**.
 
 Supported languages: **Chinese, Japanese, English**; supported models: **V2**, **V2Pro**, **V2ProPlus**.
 
 ## ✨ Features
 
-- ⚡ **Extreme performance**: CUDA Graph + Nested KV Cache + Continuous Batching — **3x~4x faster** than the original with **half the VRAM**
-- 🎭 **Multi-speaker shared backbone**: `MultiSpeakerTTS` serves many speakers with one backbone via dynamic weight injection (unique to this repo)
-- 🎵 **Timbre/style decoupling**: timbre reference (Speaker) and style reference (Prompt) controlled independently
+- 🎭 **Multi-speaker shared backbone**: one GPT+SoVITS backbone serves 10+ speakers, with only ~25 GPT keys + 37 SoVITS keys of per-speaker weights
+- 🔀 **Zero-cost speaker switching**: per-speaker weights are dynamically injected on demand — no extra inference cost when switching
+- 🔌 **Auto compatibility check**: speakers incompatible with the backbone architecture auto-degrade to full loading without affecting others
+- ⚡ **All inference modes**: single-speaker `infer`, token-level streaming `infer_stream`, same-speaker GPU-parallel `infer_batched`
+- 🎵 **Timbre/style decoupling**: timbre (Speaker) and style (Prompt) controlled independently, with per-call style overrides
+- 🖥️ **WebUI / API support**: `<speaker:name>` tag mixed synthesis, 6+1 MultiSpeaker API endpoints
 - ⏱️ **Character-level timestamps**: per-character timestamps for subtitle sync
-- 🔄 **Token-level streaming**: `infer_stream` with ultra-low first-token latency
-- 🎤 **Zero-shot voice conversion**: `infer_vc` transfers any reference audio's timbre directly
-- 🔍 **Speaker verification**: `verify_speaker` checks whether two audio clips are the same speaker
 - 🌐 **Trilingual support**: auto language detection for Chinese/Japanese/English (`auto` / `ja` / `zh` / `en`)
 
-## ⚡ Performance Comparison
+## 🎭 MultiSpeakerTTS Shared-Backbone Inference (Core Feature)
 
-> [!NOTE]
-> **Test Environment**: NVIDIA GeForce RTX 3050 (Laptop)
+### How It Works
 
-| Backend | Settings | TTFT (First Packet) | RTF (Real-time Factor) | VRAM | Speedup |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Original** | `streaming_mode=3` | 436 ms | 0.381 | 1.6 GB | - |
-| **Lite Version** | `Flash_Attn=Off` | 150 ms | 0.125 | **0.8 GB** | ⚡ **2.9x** Speed |
-| **Lite Version** | `Flash_Attn=On` | **133 ms** | **0.108** | **0.8 GB** | 🔥 **3.3x** Speed |
+Unlike the traditional "one full model per speaker" approach, `MultiSpeakerTTS` first loads **one shared GPT+SoVITS backbone**, then stores each speaker's fine-tuned weight deltas (~25 GPT keys + 37 SoVITS keys) separately; at inference time, the corresponding weights are **dynamically injected** by speaker name.
 
-**GSV-TTS-Lite** achieves **3x ~ 4x** speed improvements while **halving** the VRAM usage! 🚀
-
-| GPU Model | Throughput (tok/s) | FlashAttention2 |
-| :--- | :---: | :---: |
-| **RTX-PRO-6000** | 1122.72 | Enable |
-| **H200** | 886.47 | Enable |
-| **A100** | 660.73 | Enable |
-| **T4** | 281.06 | Disabled |
-
-**Core optimization technologies:** CUDA Graph, Nested KV Cache, and Continuous Batching.
-
-## 🎭 MultiSpeakerTTS Shared-Backbone Inference (Core Feature of This Repo)
-
-`MultiSpeakerTTS` loads multiple fine-tuned speakers in a single session, sharing one GPT + SoVITS model backbone. Each speaker injects only ~5-15% lightweight per-speaker weights (~25 GPT keys + 37 SoVITS keys).
+Memory/VRAM usage ≈ **1 backbone + 1 speaker's weights**, not "speaker count × full model". On GPU, weight injection adds almost no VRAM overhead, and the benefit grows linearly with the number of speakers.
 
 ### Benchmarks (Shared Backbone vs Full Loading)
 
@@ -164,7 +136,7 @@ audio = tts.infer(
 )
 audio.play()
 
-# Streaming inference — token-level streaming with the same low-latency real-time feedback as TTS.infer_stream
+# Streaming inference — token-level streaming with low-latency real-time feedback
 for chunk in tts.infer_stream(
     "alice",
     "What a wonderful day it is!",
@@ -187,7 +159,7 @@ audios = tts.infer_batched(
     text_languages=["en", "en", "en"],  # or just pass "auto"
 )
 
-# Runtime management
+# Runtime management: add/remove speakers dynamically, no restart needed
 tts.add_speaker(SpeakerConfig(name="charlie", ...))
 tts.remove_speaker("bob")
 print(tts.speaker_names)  # ["alice", "charlie"]
@@ -236,7 +208,10 @@ pip install -e .
 > export GSV_MIRROR=modelscope
 > ```
 
-### Basic Inference
+### Single-Speaker Basic Inference
+
+> [!NOTE]
+> For single-speaker scenarios, you can directly use `TTS` (this repo also provides full single-speaker inference capability, see the [Single-Speaker Inference](#-single-speaker-inference-tts) section).
 
 ```python
 from gsv_tts import TTS
@@ -248,14 +223,6 @@ tts = TTS(use_bert=True)
 tts.load_gpt_model()
 tts.load_sovits_model()
 
-# Pre-load and cache resources to significantly reduce latency during the first inference.
-# tts.init_language_module("ja")
-# tts.cache_spk_audio("examples\laffey.mp3")
-# tts.cache_prompt_audio(
-#     prompt_audio_paths="examples\AnAn.ogg",
-#     prompt_audio_texts="ちが……ちがう。レイア、貴様は間違っている。",
-# )
-
 # infer is the most rudimentary inference method, suitable only for short text. It is generally recommended to use infer_batched instead.
 audio = tts.infer(
     spk_audio_path="examples\laffey.mp3", # Voice reference audio (Timbre)
@@ -264,18 +231,19 @@ audio = tts.infer(
     text="へぇー、ここまでしてくれるんですね。", # Target text to be generated
     text_language="auto", # Language of the target text: "auto" / "ja" / "zh" / "en", auto-detected by default
     prompt_language="auto", # Language of the prompt audio text: "auto" / "ja" / "zh" / "en", auto-detected by default
-    # gpt_model = None, # Path to the GPT model for inference; defaults to the first loaded GPT model.
-    # sovits_model = None, # Path to the SoVITS model for inference; defaults to the first loaded SoVITS model.
 )
 
 audio.play()
 tts.audio_queue.wait()
-# tts.audio_queue.stop() # Stop playback
 ```
 
-## 📖 Usage
+## 📖 Single-Speaker Inference (TTS)
 
-### 1. Stream Inference / Subtitle Synchronization
+> [!NOTE]
+> The following are advanced usages of the `TTS` single-speaker engine. MultiSpeakerTTS's `infer` / `infer_stream` / `infer_batched` provide the same capabilities (routed by speaker name).
+
+<details>
+<summary><strong>1. Stream Inference / Subtitle Synchronization</strong></summary>
 
 `infer_stream` implements token-level streaming output, significantly reducing first-token latency. `infer`, `infer_stream`, `infer_batched`, and `infer_vc` all support character-level timestamp returns.
 
@@ -343,7 +311,10 @@ tts.audio_queue.wait()
 subtitlesqueue.add(None, None)
 ```
 
-### 2. Batched Inference
+</details>
+
+<details>
+<summary><strong>2. Batched Inference</strong></summary>
 
 `infer_batched` is optimized for long-form text and multi-sentence synthesis, supporting different reference audios for different sentences within the same batch.
 
@@ -369,38 +340,33 @@ for i, audio in enumerate(audios):
     audio.save(f"audio{i}.wav")
 ```
 
-### 3. Voice Conversion (Zero-shot)
+</details>
+
+<details>
+<summary><strong>3. Voice Conversion / Speaker Verification</strong></summary>
 
 ```python
 from gsv_tts import TTS
 
+# Zero-shot voice conversion
 tts = TTS(use_bert=True, always_load_cnhubert=True)
-
-# Although infer_vc supports zero-shot voice conversion, its conversion quality still has room for improvement compared to specialized models like RVC or SVC.
 audio = tts.infer_vc(
     spk_audio_path="examples\laffey.mp3",
     prompt_audio_path="examples\AnAn.ogg",
     prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
 )
-
 audio.play()
-tts.audio_queue.wait()
-```
 
-### 4. Speaker Verification
-
-```python
-from gsv_tts import TTS
-
-tts = TTS(use_bert=True, always_load_sv=True)
-
-# verify_speaker compares the speaker characteristics of two audio clips to determine if they are the same person.
-similarity = tts.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
+# Speaker verification: check whether two audio clips are the same speaker
+tts2 = TTS(use_bert=True, always_load_sv=True)
+similarity = tts2.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
 print("Speaker Similarity:", similarity)
 ```
 
+</details>
+
 <details>
-<summary><strong>5. Other Function Interfaces</strong></summary>
+<summary><strong>4. Other Function Interfaces</strong></summary>
 
 #### Model Management
 
@@ -453,9 +419,9 @@ pip install -r requirements.txt
 
 ```
 gsv_tts/                  # Core Python package (pip install -e .)
+├── MultiSpeaker.py       # 🎭 Multi-speaker shared-backbone inference engine: MultiSpeakerTTS (core of this repo)
+├── SpeakerWeights.py     # 🎭 Speaker config & weight extraction: SpeakerConfig / SpeakerWeights
 ├── TTS.py                # Single-speaker inference engine: infer / infer_stream / infer_batched / infer_vc
-├── MultiSpeaker.py       # Multi-speaker shared-backbone inference engine: MultiSpeakerTTS
-├── SpeakerWeights.py     # Speaker config & weight extraction: SpeakerConfig / SpeakerWeights
 ├── Loader.py             # Weight loading & SoVITS version sniffing
 ├── Download.py           # Automatic model download (multi-mirror selection)
 ├── TextProcessor.py      # Text → phonemes / BERT features
@@ -467,8 +433,8 @@ gsv_tts/                  # Core Python package (pip install -e .)
     ├── G2P/              # Chinese/Japanese/English phoneme conversion
     ├── Featurizer/       # CNHubert / CNRoBERTa feature extractors
     └── SV/               # Speaker verification model (ERes2Net)
-tests/                    # Test scripts (self-consistency test)
-benchmarks/               # Performance benchmark scripts
+tests/                    # Test scripts (MultiSpeaker self-consistency test)
+benchmarks/               # MultiSpeaker performance benchmark scripts
 WebUI/                    # Gradio Web UI (own requirements.txt)
 API/                      # FastAPI servers (own requirements.txt)
 examples/                 # Example reference audio (laffey.mp3 / AnAn.ogg)
@@ -526,17 +492,17 @@ export GSV_MIRROR=modelscope
 **Q1: The multi-speaker feature can't be installed from PyPI?**
 The MultiSpeakerTTS feature of this repo is not yet published to PyPI. Install from this repository with `pip install -e .`.
 
-**Q2: Model downloads on first run are slow or failing?**
-Force a mirror with the `GSV_MIRROR` environment variable (`modelscope` is recommended in China), or place the model files manually into the cache directory (default `~/.cache/gsv`; see the "First Run" section for the layout).
-
-**Q3: CUDA graph related errors?**
-Usually caused by misconfigured `gpt_cache` / `sovits_cache` — restore the defaults; MPS/CPU environments don't need these params.
-
-**Q4: A speaker's VRAM/memory usage is abnormally high — it didn't use the shared backbone?**
+**Q2: A speaker's VRAM/memory usage is abnormally high — it didn't use the shared backbone?**
 The speaker's model architecture is incompatible with the base model (e.g. v2's `upsample_initial_channel=512` vs base `768`) and it auto-degraded to full loading. The load log will show this; we recommend fine-tuned models matching the base architecture (v2ProPlus).
 
-**Q5: I changed the reference audio content, but inference results didn't change?**
+**Q3: I changed the reference audio content, but inference results didn't change?**
 The speaker/style reference audio cache is keyed by path — replacing the file content at the same path hits the stale cache. After changing content, remove the cache entries (`del_spk_audio` / `del_prompt_audio`) or use a new file path.
+
+**Q4: Model downloads on first run are slow or failing?**
+Force a mirror with the `GSV_MIRROR` environment variable (`modelscope` is recommended in China), or place the model files manually into the cache directory (default `~/.cache/gsv`; see the "First Run" section for the layout).
+
+**Q5: CUDA graph related errors?**
+Usually caused by misconfigured `gpt_cache` / `sovits_cache` — restore the defaults; MPS/CPU environments don't need these params.
 
 **Q6: `weights_only=False` security warning when loading models?**
 This is intentional for compatibility with legacy GPT-SoVITS checkpoints. Only load models from trusted sources, or convert weights to the safetensors directory format (`tts.to_safetensors`) to eliminate the risk.
@@ -556,7 +522,3 @@ For **lower latency** and **higher throughput**, enabling Flash Attention is hig
 Special thanks to the following projects:
 - [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)
 - [chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite)
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=chinokikiss/GSV-TTS-Lite&type=Date)](https://star-history.com/#chinokikiss/GSV-TTS-Lite&Date)

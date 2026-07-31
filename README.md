@@ -10,14 +10,10 @@
 </div>
 
 <div align="center">
-  <a href="项目主页链接">
-    <img src="huiyeji.gif" alt="Logo" width="240" height="254">
-  </a>
-
-  <h1>GSV-TTS-Lite</h1>
+  <h1>GSV-TTS-Lite · MultiSpeaker</h1>
 
   <p>
-    A high-performance inference engine specifically designed for the GPT-SoVITS text-to-speech model
+    GPT-SoVITS 多角色共享骨干推理引擎（MultiSpeakerTTS）
   </p>
 
   <p align="center">
@@ -50,56 +46,32 @@
   </p>
 </div>
 
-<div align="center">
-  <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif">
-</div>
-
 ## 关于项目 (About)
 
-本项目诞生于对极致性能的追求：原版 GPT-SoVITS 在 RTX 3050 (Laptop) 等低算力设备上，推理延迟难以满足实时交互需求。
+**GSV-TTS-Lite** 是基于 **GPT-SoVITS (V2/V2Pro/V2ProPlus)** 的高性能推理引擎，通过 CUDA Graph、Nested KV Cache、Continuous Batching 等深度优化，实现毫秒级实时合成（相比原版 3x~4x 提速、显存减半）。
 
-**GSV-TTS-Lite** 是基于 **GPT-SoVITS (V2/V2Pro/V2ProPlus)** 开发的高性能推理引擎，通过 CUDA Graph、Nested KV Cache、Continuous Batching 等深度优化，在低显存环境下实现毫秒级实时响应。除性能优势外，还实现了**音色与风格解耦**、**字级时间戳对齐**、**音色迁移**、**声纹识别**等特色功能。
-
-本仓库在其基础上，额外提供了 **MultiSpeakerTTS 多角色共享骨干推理**：一套 GPT+SoVITS 骨干同时承载多个微调角色，每个角色仅注入约 5-15% 的轻量专属权重，即可节省 40%~75% 的显存/内存占用。
+本仓库的核心是 **MultiSpeakerTTS 多角色共享骨干推理**：用**一套** GPT+SoVITS 骨干同时承载多个微调角色，每个角色仅注入约 5-15% 的轻量专属权重，即可节省 **40%~75%** 的显存/内存——**角色越多，节省越大**。
 
 支持语言：**中日英**；支持模型：**V2**、**V2Pro**、**V2ProPlus**。
 
 ## ✨ 功能特性 (Features)
 
-- ⚡ **极致性能**：CUDA Graph + Nested KV Cache + Continuous Batching，相比原版 **3x~4x 提速**、**显存减半**
-- 🎭 **多角色共享骨干**：`MultiSpeakerTTS` 一套骨干承载多角色，动态注入专属权重（本仓库独有）
-- 🎵 **音色与风格解耦**：音色参考（Speaker）与风格参考（Prompt）独立控制
-- ⏱️ **字级时间戳对齐**：逐字返回时间戳，支持字幕同步
-- 🔄 **Token 级流式推理**：`infer_stream` 极低首字延迟
-- 🎤 **零样本音色迁移**：`infer_vc` 直接转换任意参考音频的音色
-- 🔍 **声纹识别**：`verify_speaker` 判定两段音频是否同一说话人
+- 🎭 **多角色共享骨干**：一套 GPT+SoVITS 骨干承载 10+ 角色，每角色仅需约 25 GPT keys + 37 SoVITS keys 的专属权重
+- 🔀 **零开销角色切换**：角色权重按需动态注入，切换角色无额外推理成本
+- 🔌 **自动兼容性校验**：角色模型与骨干架构不匹配时自动降级为全量加载，不中断其他角色
+- ⚡ **全模式推理**：单角色 `infer`、Token 级流式 `infer_stream`、同角色 GPU 并行 `infer_batched`
+- 🎵 **音色与风格解耦**：音色（Speaker）与风格（Prompt）独立控制，支持按次调用覆盖风格参考
+- 🖥️ **WebUI / API 全支持**：`<speaker:角色名>` 标签混用合成、6+1 个 MultiSpeaker API 端点
+- ⏱️ **字级时间戳**：逐字返回时间戳，支持字幕同步
 - 🌐 **三语支持**：中日英自动语言检测（`auto` / `ja` / `zh` / `en`）
 
-## ⚡ 性能对比 (Performance)
+## 🎭 MultiSpeakerTTS 共享骨干推理（核心特性）
 
-> [!NOTE]
-> **测试环境**：NVIDIA GeForce RTX 3050 (Laptop)
+### 工作原理
 
-| 推理后端 (Backend) | 设置 (Settings) | 首包延迟 (TTFT) | 实时率 (RTF) | 显存 (VRAM) | 提升幅度 |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Original** | `streaming_mode=3` | 436 ms | 0.381 | 1.6 GB | - |
-| **Lite Version** | `Flash_Attn=Off` | 150 ms | 0.125 | **0.8 GB** | ⚡ **2.9x** Speed |
-| **Lite Version** | `Flash_Attn=On` | **133 ms** | **0.108** | **0.8 GB** | 🔥 **3.3x** Speed |
+与传统"每角色全量加载一套模型"不同，`MultiSpeakerTTS` 先加载**一套共享的 GPT+SoVITS 骨干**，再将每个角色的微调权重差异（约 25 GPT keys + 37 SoVITS keys）单独保存；推理时按角色名**动态注入**对应权重。
 
-**GSV-TTS-Lite** 实现了 **3x ~ 4x** 速度提升，且显存占用**减半**！🚀
-
-| GPU Model | Throughput (tok/s) | FlashAttention2 |
-| :--- | :---: | :---: |
-| **RTX-PRO-6000** | 1122.72 | Enable |
-| **H200** | 886.47 | Enable |
-| **A100** | 660.73 | Enable |
-| **T4** | 281.06 | Disabled |
-
-**核心优化技术：** CUDA Graph、Nested KV Cache、Continuous Batching。
-
-## 🎭 MultiSpeakerTTS 共享骨干推理（本仓库核心特性）
-
-`MultiSpeakerTTS` 支持在同一会话中加载多个微调角色，共享一套 GPT + SoVITS 模型骨干，每个角色仅注入 ~5-15% 的轻量专属权重（约 25 个 GPT keys + 37 个 SoVITS keys）。
+因此内存/显存占用 ≈ **1 套骨干 + 1 份角色权重**，而非"角色数 × 全量模型"。GPU 环境下权重注入几乎不增加显存开销，收益随角色数量线性增长。
 
 ### 实测基准（共享骨干 vs 全量加载）
 
@@ -164,7 +136,7 @@ audio = tts.infer(
 )
 audio.play()
 
-# 流式推理——Token 级流式输出，与 TTS.infer_stream 同样支持低延迟实时反馈
+# 流式推理——Token 级流式输出，低延迟实时反馈
 for chunk in tts.infer_stream(
     "alice",
     "へぇー、ここまでしてくれるんですね。",
@@ -187,7 +159,7 @@ audios = tts.infer_batched(
     text_languages=["ja", "ja", "ja"],  # 或直接传 "auto"
 )
 
-# 运行时管理
+# 运行时管理：动态增删角色，无需重启
 tts.add_speaker(SpeakerConfig(name="charlie", ...))
 tts.remove_speaker("bob")
 print(tts.speaker_names)  # ["alice", "charlie"]
@@ -236,7 +208,10 @@ pip install -e .
 > set GSV_MIRROR=modelscope
 > ```
 
-### 基础推理
+### 单说话人基础推理
+
+> [!NOTE]
+> 仅需单角色的场景，可直接使用 `TTS`（本仓库同样提供完整单说话人推理能力，见[单说话人推理](#-单说话人推理-tts)一节）。
 
 ```python
 from gsv_tts import TTS
@@ -248,14 +223,6 @@ tts = TTS(use_bert=True)
 tts.load_gpt_model()
 tts.load_sovits_model()
 
-# 预加载与缓存资源，可显著减少首次推理的延迟
-# tts.init_language_module("ja")
-# tts.cache_spk_audio("examples\laffey.mp3")
-# tts.cache_prompt_audio(
-#     prompt_audio_paths="examples\AnAn.ogg",
-#     prompt_audio_texts="ちが……ちがう。レイア、貴様は間違っている。",
-# )
-
 # infer 是最简单、最原始的推理方式，只适用于短文本推理，一般建议用 infer_batched 替代 infer 推理。
 audio = tts.infer(
     spk_audio_path="examples\laffey.mp3", # 音色参考音频
@@ -264,18 +231,19 @@ audio = tts.infer(
     text="へぇー、ここまでしてくれるんですね。", # 目标生成文本
     text_language="auto", # 目标文本语言："auto" / "ja" / "zh" / "en"，默认自动检测
     prompt_language="auto", # 参考音频文本语言："auto" / "ja" / "zh" / "en"，默认自动检测
-    # gpt_model = None, # 用于推理的GPT模型路径，默认用第一个加载的GPT模型推理
-    # sovits_model = None, # 用于推理的SoVITS模型路径，默认用第一个加载的SoVITS模型推理
 )
 
 audio.play()
 tts.audio_queue.wait()
-# tts.audio_queue.stop() 停止播放
 ```
 
-## 📖 使用指南 (Usage)
+## 📖 单说话人推理 (TTS)
 
-### 1. 流式推理 / 字幕同步
+> [!NOTE]
+> 以下为 `TTS` 单说话人引擎的进阶用法。MultiSpeakerTTS 的 `infer` / `infer_stream` / `infer_batched` 均具备同等能力（按角色名路由）。
+
+<details>
+<summary><strong>1. 流式推理 / 字幕同步</strong></summary>
 
 `infer_stream` 实现了 Token 级别的流式输出，显著降低首字延迟。`infer`、`infer_stream`、`infer_batched`、`infer_vc` 均支持字级时间戳返回。
 
@@ -343,7 +311,10 @@ tts.audio_queue.wait()
 subtitlesqueue.add(None, None)
 ```
 
-### 2. 批量推理
+</details>
+
+<details>
+<summary><strong>2. 批量推理</strong></summary>
 
 `infer_batched` 专为长文本及多句合成场景优化，支持在同一批次中为不同句子指定不同的参考音频。
 
@@ -369,38 +340,33 @@ for i, audio in enumerate(audios):
     audio.save(f"audio{i}.wav")
 ```
 
-### 3. 音色迁移（零样本变声）
+</details>
+
+<details>
+<summary><strong>3. 音色迁移 / 声纹识别</strong></summary>
 
 ```python
 from gsv_tts import TTS
 
+# 零样本音色迁移（变声）
 tts = TTS(use_bert=True, always_load_cnhubert=True)
-
-# infer_vc 虽支持 Zero-shot 音色迁移，但转换质量相较 RVC、SVC 等专门变声模型仍有提升空间。
 audio = tts.infer_vc(
     spk_audio_path="examples\laffey.mp3",
     prompt_audio_path="examples\AnAn.ogg",
     prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
 )
-
 audio.play()
-tts.audio_queue.wait()
-```
 
-### 4. 声纹识别
-
-```python
-from gsv_tts import TTS
-
-tts = TTS(use_bert=True, always_load_sv=True)
-
-# verify_speaker 用于对比两段音频的说话人特征，判断其是否为同一人。
-similarity = tts.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
+# 声纹识别：对比两段音频是否为同一说话人
+tts2 = TTS(use_bert=True, always_load_sv=True)
+similarity = tts2.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
 print("声纹相似度：", similarity)
 ```
 
+</details>
+
 <details>
-<summary><strong>5. 其他函数接口</strong></summary>
+<summary><strong>4. 其他函数接口</strong></summary>
 
 #### 模型管理
 
@@ -453,9 +419,9 @@ pip install -r requirements.txt
 
 ```
 gsv_tts/                  # 核心 Python 包（pip install -e . 安装）
+├── MultiSpeaker.py       # 🎭 多说话人共享骨干推理引擎：MultiSpeakerTTS（本仓库核心）
+├── SpeakerWeights.py     # 🎭 角色配置与权重提取：SpeakerConfig / SpeakerWeights
 ├── TTS.py                # 单说话人推理引擎：infer / infer_stream / infer_batched / infer_vc
-├── MultiSpeaker.py       # 多说话人共享骨干推理引擎：MultiSpeakerTTS
-├── SpeakerWeights.py     # 角色配置与权重提取：SpeakerConfig / SpeakerWeights
 ├── Loader.py             # 权重加载与 SoVITS 版本嗅探
 ├── Download.py           # 模型自动下载（多镜像选择）
 ├── TextProcessor.py      # 文本 → 音素 / BERT 特征
@@ -467,8 +433,8 @@ gsv_tts/                  # 核心 Python 包（pip install -e . 安装）
     ├── G2P/              # 中日英音素转换
     ├── Featurizer/       # CNHubert / CNRoBERTa 特征提取
     └── SV/               # 声纹模型（ERes2Net）
-tests/                    # 测试脚本（自洽性测试）
-benchmarks/               # 性能基准脚本
+tests/                    # 测试脚本（MultiSpeaker 自洽性测试）
+benchmarks/               # MultiSpeaker 性能基准脚本
 WebUI/                    # Gradio Web 界面（独立 requirements.txt）
 API/                      # FastAPI 服务（独立 requirements.txt）
 examples/                 # 示例参考音频（laffey.mp3 / AnAn.ogg）
@@ -526,17 +492,17 @@ export GSV_MIRROR=modelscope
 **Q1：多说话人功能无法从 PyPI 安装？**
 本仓库的 MultiSpeakerTTS 功能尚未发布至 PyPI。请从本仓库 `pip install -e .` 安装。
 
-**Q2：首次运行下载模型很慢或失败？**
-用 `GSV_MIRROR` 环境变量强制指定镜像（国内建议 `modelscope`），或将模型文件手动放置到缓存目录（默认 `~/.cache/gsv`，结构见「首次运行」小节）。
-
-**Q3：报 CUDA graph 相关错误？**
-多为 `gpt_cache` / `sovits_cache` 参数配置不当，恢复默认值即可；MPS/CPU 环境不需要这两个参数。
-
-**Q4：某角色显存/内存占用异常高，没有走共享骨干？**
+**Q2：某角色显存/内存占用异常高，没有走共享骨干？**
 该角色模型架构与基模型不兼容（如 v2 的 `upsample_initial_channel=512` vs 基模型 `768`），已自动降级为全量加载。加载日志会提示；建议统一使用与基模型同架构（v2ProPlus）的微调模型。
 
-**Q5：修改了参考音频内容，但推理结果没变？**
+**Q3：修改了参考音频内容，但推理结果没变？**
 说话人/风格参考音频缓存以路径为键——同一路径替换文件内容后会命中旧缓存。更换内容后请删除对应缓存（`del_spk_audio` / `del_prompt_audio`）或更换文件路径。
+
+**Q4：首次运行下载模型很慢或失败？**
+用 `GSV_MIRROR` 环境变量强制指定镜像（国内建议 `modelscope`），或将模型文件手动放置到缓存目录（默认 `~/.cache/gsv`，结构见「首次运行」小节）。
+
+**Q5：报 CUDA graph 相关错误？**
+多为 `gpt_cache` / `sovits_cache` 参数配置不当，恢复默认值即可；MPS/CPU 环境不需要这两个参数。
 
 **Q6：加载模型时出现 `weights_only=False` 安全警告？**
 这是为兼容旧版 GPT-SoVITS 检查点的刻意行为。仅加载可信来源的模型，或将权重转换为 safetensors 目录格式（`tts.to_safetensors`）以消除该风险。
@@ -556,7 +522,3 @@ export GSV_MIRROR=modelscope
 特别感谢以下项目：
 - [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)
 - [chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite)
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=chinokikiss/GSV-TTS-Lite&type=Date)](https://star-history.com/#chinokikiss/GSV-TTS-Lite&Date)

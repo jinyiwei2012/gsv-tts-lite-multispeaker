@@ -10,14 +10,10 @@
 </div>
 
 <div align="center">
-  <a href="プロジェクトページリンク">
-    <img src="huiyeji.gif" alt="Logo" width="240" height="254">
-  </a>
-
-  <h1>GSV-TTS-Lite</h1>
+  <h1>GSV-TTS-Lite · MultiSpeaker</h1>
 
   <p>
-    A high-performance inference engine specifically designed for the GPT-SoVITS text-to-speech model
+    GPT-SoVITS マルチスピーカー共有骨格推論エンジン（MultiSpeakerTTS）
   </p>
 
   <p align="center">
@@ -50,56 +46,32 @@
   </p>
 </div>
 
-<div align="center">
-  <img src="https://user-images.githubusercontent.com/73097560/115834477-dbab4500-a447-11eb-908a-139a6edaec5c.gif">
-</div>
-
 ## プロジェクトについて (About)
 
-本プロジェクトは、極限までのパフォーマンス追求を初衷として誕生しました。RTX 3050 (Laptop) などのローエンドデバイスでは、原版 GPT-SoVITS の推論遅延がリアルタイム交互のニーズを満たすことが難しい場合がありました。
+**GSV-TTS-Lite** は **GPT-SoVITS (V2/V2Pro/V2ProPlus)** に基づく高性能推論エンジンです。CUDA Graph、Nested KV Cache、Continuous Batching などの深層最適化により、ミリ秒級のリアルタイム合成を実現します（原版比 3x~4x 高速、VRAM 半減）。
 
-**GSV-TTS-Lite** は **GPT-SoVITS (V2/V2Pro/V2ProPlus)** に基づいて開発された高性能推論エンジンです。CUDA Graph、Nested KV Cache、Continuous Batching などの深層最適化技術により、低 VRAM 環境でミリ秒級のリアルタイム応答を実現しました。パフォーマンスに加え、**音色とスタイルの分離**、**文字単位のタイムスタンプ同期**、**音色変換**、**声紋認識**などの特徴も備えています。
-
-さらに本リポジトリは、**MultiSpeakerTTS マルチスピーカー共有骨格推論**を提供します。1 セットの GPT+SoVITS 骨格で複数のファインチューニングされた話者を同時に担い、各話者はわずか ~5-15% の軽量な専用重みを注入するだけで、**40%~75%** の VRAM/メモリを節約できます。
+本リポジトリのコアは **MultiSpeakerTTS マルチスピーカー共有骨格推論**です：**1 セットの** GPT+SoVITS 骨格で複数のファインチューニングされた話者を同時に担い、各話者はわずか ~5-15% の軽量な専用重みを注入するだけで、**40%~75%** の VRAM/メモリを節約できます——**話者が多ければ多いほど節約効果は大きくなります**。
 
 対応言語：**中国語、日本語、英語**。対応モデル：**V2**、**V2Pro**、**V2ProPlus**。
 
 ## ✨ 機能一覧 (Features)
 
-- ⚡ **究極のパフォーマンス**：CUDA Graph + Nested KV Cache + Continuous Batching — 原版比 **3x~4x 高速**、**VRAM 半減**
-- 🎭 **マルチスピーカー共有骨格**：`MultiSpeakerTTS` が 1 つの骨格で複数話者に対応、動的重み注入（本リポジトリ独自）
-- 🎵 **音色とスタイルの分離**：音色参照（Speaker）とスタイル参照（Prompt）を独立制御
-- ⏱️ **文字単位のタイムスタンプ**：字幕同期に対応した文字単位のタイムスタンプ返却
-- 🔄 **Token レベルのストリーミング**：`infer_stream` による極低遅延の初字出力
-- 🎤 **ゼロショット音色変換**：`infer_vc` で任意の参照音声の音色を直接変換
-- 🔍 **声紋認識**：`verify_speaker` で 2 つの音声が同一話者かを判定
+- 🎭 **マルチスピーカー共有骨格**：1 セットの GPT+SoVITS 骨格で 10+ 話者に対応。各話者の専用重みは約 25 GPT keys + 37 SoVITS keys のみ
+- 🔀 **ゼロコスト話者切替**：話者重みを必要に応じて動的注入。切替時の追加推論コストなし
+- 🔌 **自動互換性チェック**：骨格とアーキテクチャが不一致の話者は自動的に全量ロードへデグレード。他の話者には影響なし
+- ⚡ **全推論モード**：単一話者 `infer`、Token レベルストリーミング `infer_stream`、同一話者 GPU 並列 `infer_batched`
+- 🎵 **音色とスタイルの分離**：音色（Speaker）とスタイル（Prompt）を独立制御。呼び出しごとのスタイル上書きに対応
+- 🖥️ **WebUI / API 全対応**：`<speaker:名前>` タグによる混在合成、6+1 の MultiSpeaker API エンドポイント
+- ⏱️ **文字単位タイムスタンプ**：字幕同期に対応した文字単位のタイムスタンプ返却
 - 🌐 **3 言語対応**：中日英の自動言語検出（`auto` / `ja` / `zh` / `en`）
 
-## ⚡ パフォーマンス比較 (Performance)
+## 🎭 MultiSpeakerTTS 共有骨格推論（コア機能）
 
-> [!NOTE]
-> **テスト環境**：NVIDIA GeForce RTX 3050 (Laptop)
+### 動作原理
 
-| 推論バックエンド (Backend) | 設定 (Settings) | 初包遅延 (TTFT) | リアルタイム率 (RTF) | VRAM | 向上幅 |
-| :--- | :--- | :---: | :---: | :---: | :--- |
-| **Original** | `streaming_mode=3` | 436 ms | 0.381 | 1.6 GB | - |
-| **Lite Version** | `Flash_Attn=Off` | 150 ms | 0.125 | **0.8 GB** | ⚡ **2.9x** 速度 |
-| **Lite Version** | `Flash_Attn=On` | **133 ms** | **0.108** | **0.8 GB** | 🔥 **3.3x** 速度 |
+従来の「話者ごとにモデルをフルロード」方式とは異なり、`MultiSpeakerTTS` はまず**1 セットの共有 GPT+SoVITS 骨格**をロードし、各話者のファインチューニング差分重み（約 25 GPT keys + 37 SoVITS keys）を個別に保存します。推論時は話者名に応じて対応する重みを**動的に注入**します。
 
-**GSV-TTS-Lite** は **3x ~ 4x** の速度向上を実現し、VRAM 占有量も**半分**になりました！🚀
-
-| GPU Model | Throughput (tok/s) | FlashAttention2 |
-| :--- | :---: | :---: |
-| **RTX-PRO-6000** | 1122.72 | Enable |
-| **H200** | 886.47 | Enable |
-| **A100** | 660.73 | Enable |
-| **T4** | 281.06 | Disabled |
-
-**コア最適化技術：** CUDA Graph、Nested KV Cache、Continuous Batching。
-
-## 🎭 MultiSpeakerTTS 共有骨格推論（本リポジトリのコア機能）
-
-`MultiSpeakerTTS` は、単一セッションで複数のファインチューニングされた話者をロードし、GPT + SoVITS のモデル骨格を共有します。各話者はわずか ~5-15% の軽量な専用重み（約 25 GPT keys + 37 SoVITS keys）を注入するだけです。
+そのため、メモリ/VRAM 使用量 ≈ **1 骨格 + 1 話者分の重み**であり、「話者数 × フルモデル」ではありません。GPU 環境では重み注入による VRAM オーバーヘッドはほぼゼロで、効果は話者数の増加に比例して拡大します。
 
 ### 実測ベンチマーク（共有骨格 vs 全量ロード）
 
@@ -164,7 +136,7 @@ audio = tts.infer(
 )
 audio.play()
 
-# ストリーミング推論 — Token レベルのストリーミング出力。TTS.infer_stream と同様に低遅延のリアルタイムフィードバックを実現
+# ストリーミング推論 — Token レベルのストリーミング出力、低遅延のリアルタイムフィードバック
 for chunk in tts.infer_stream(
     "alice",
     "へぇー、ここまでしてくれるんですね。",
@@ -187,7 +159,7 @@ audios = tts.infer_batched(
     text_languages=["ja", "ja", "ja"],  # または単に "auto" を渡す
 )
 
-# 実行時管理
+# 実行時管理：話者の追加・削除を動的に実行、再起動不要
 tts.add_speaker(SpeakerConfig(name="charlie", ...))
 tts.remove_speaker("bob")
 print(tts.speaker_names)  # ["alice", "charlie"]
@@ -236,7 +208,10 @@ pip install -e .
 > export GSV_MIRROR=modelscope
 > ```
 
-### 基本推論
+### 単一話者基本推論
+
+> [!NOTE]
+> 単一話者だけでよい場合は `TTS` を直接使用できます（本リポジトリは単一話者推論の全機能も提供しています。詳細は[単一話者推論](#-単一話者推論-tts)セクション参照）。
 
 ```python
 from gsv_tts import TTS
@@ -248,14 +223,6 @@ tts = TTS(use_bert=True)
 tts.load_gpt_model()
 tts.load_sovits_model()
 
-# リソースを事前ロードおよびキャッシュし、初回推論の遅延を大幅に削減できます
-# tts.init_language_module("ja")
-# tts.cache_spk_audio("examples\laffey.mp3")
-# tts.cache_prompt_audio(
-#     prompt_audio_paths="examples\AnAn.ogg",
-#     prompt_audio_texts="ちが……ちがう。レイア、貴様は間違っている。",
-# )
-
 # infer は最もシンプルで原始的な推論方式であり、短文の推論にのみ適しています。通常、infer の代わりに infer_batched を使用することが推奨されます。
 audio = tts.infer(
     spk_audio_path="examples\laffey.mp3", # 音色参照オーディオ
@@ -264,18 +231,19 @@ audio = tts.infer(
     text="へぇー、ここまでしてくれるんですね。", # 生成対象テキスト
     text_language="auto", # 対象テキストの言語："auto" / "ja" / "zh" / "en"、デフォルトは自動検出
     prompt_language="auto", # 参照オーディオテキストの言語："auto" / "ja" / "zh" / "en"、デフォルトは自動検出
-    # gpt_model = None, # 推論に使用する GPT モデルのパス。デフォルトでは最初にロードされた GPT モデルで推論します
-    # sovits_model = None, # 推論に使用する SoVITS モデルのパス。デフォルトでは最初にロードされた SoVITS モデルで推論します
 )
 
 audio.play()
 tts.audio_queue.wait()
-# tts.audio_queue.stop() 再生を停止
 ```
 
-## 📖 使用ガイド (Usage)
+## 📖 単一話者推論 (TTS)
 
-### 1. ストリーミング推論 / 字幕同期
+> [!NOTE]
+> 以下は `TTS` 単一話者エンジンの上級用法です。MultiSpeakerTTS の `infer` / `infer_stream` / `infer_batched` も同等の機能を備えています（話者名でルーティング）。
+
+<details>
+<summary><strong>1. ストリーミング推論 / 字幕同期</strong></summary>
 
 `infer_stream` は Token レベルのストリーミング出力を実装し、初字遅延を大幅に低減します。`infer`、`infer_stream`、`infer_batched`、`infer_vc` はすべて文字単位のタイムスタンプ返却に対応しています。
 
@@ -343,7 +311,10 @@ tts.audio_queue.wait()
 subtitlesqueue.add(None, None)
 ```
 
-### 2. バッチ推論
+</details>
+
+<details>
+<summary><strong>2. バッチ推論</strong></summary>
 
 `infer_batched` は長テキストおよび多文合成シーン向けに最適化されており、同一バッチ内で異なる文に対して異なる参照オーディオを指定できます。
 
@@ -369,38 +340,33 @@ for i, audio in enumerate(audios):
     audio.save(f"audio{i}.wav")
 ```
 
-### 3. 音色変換（ゼロショット）
+</details>
+
+<details>
+<summary><strong>3. 音色変換 / 声紋認識</strong></summary>
 
 ```python
 from gsv_tts import TTS
 
+# ゼロショット音色変換（変声）
 tts = TTS(use_bert=True, always_load_cnhubert=True)
-
-# infer_vc は Zero-shot 音色変換をサポートしていますが、変換品質は RVC、SVC などの専用変声モデルと比較するとまだ向上の余地があります。
 audio = tts.infer_vc(
     spk_audio_path="examples\laffey.mp3",
     prompt_audio_path="examples\AnAn.ogg",
     prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
 )
-
 audio.play()
-tts.audio_queue.wait()
-```
 
-### 4. 声紋認識
-
-```python
-from gsv_tts import TTS
-
-tts = TTS(use_bert=True, always_load_sv=True)
-
-# verify_speaker は 2 つのオーディオの話者特徴を比較し、同一人物かどうかを判断するために使用します。
-similarity = tts.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
+# 声紋認識：2 つのオーディオが同一話者かどうかを判定
+tts2 = TTS(use_bert=True, always_load_sv=True)
+similarity = tts2.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
 print("声紋類似度：", similarity)
 ```
 
+</details>
+
 <details>
-<summary><strong>5. その他の関数インターフェース</strong></summary>
+<summary><strong>4. その他の関数インターフェース</strong></summary>
 
 #### モデル管理
 
@@ -453,9 +419,9 @@ pip install -r requirements.txt
 
 ```
 gsv_tts/                  # コア Python パッケージ（pip install -e .）
+├── MultiSpeaker.py       # 🎭 マルチスピーカー共有骨格推論エンジン：MultiSpeakerTTS（本リポジトリのコア）
+├── SpeakerWeights.py     # 🎭 話者設定と重み抽出：SpeakerConfig / SpeakerWeights
 ├── TTS.py                # 単一話者推論エンジン：infer / infer_stream / infer_batched / infer_vc
-├── MultiSpeaker.py       # マルチスピーカー共有骨格推論エンジン：MultiSpeakerTTS
-├── SpeakerWeights.py     # 話者設定と重み抽出：SpeakerConfig / SpeakerWeights
 ├── Loader.py             # 重みのロードと SoVITS バージョン検出
 ├── Download.py           # モデル自動ダウンロード（複数ミラー選択）
 ├── TextProcessor.py      # テキスト → 音素 / BERT 特徴
@@ -467,8 +433,8 @@ gsv_tts/                  # コア Python パッケージ（pip install -e .）
     ├── G2P/              # 中日英の音素変換
     ├── Featurizer/       # CNHubert / CNRoBERTa 特徴抽出
     └── SV/               # 声紋モデル（ERes2Net）
-tests/                    # テストスクリプト（自己整合性テスト）
-benchmarks/               # パフォーマンスベンチマークスクリプト
+tests/                    # テストスクリプト（MultiSpeaker 自己整合性テスト）
+benchmarks/               # MultiSpeaker パフォーマンスベンチマーク
 WebUI/                    # Gradio Web UI（独自 requirements.txt）
 API/                      # FastAPI サーバー（独自 requirements.txt）
 examples/                 # サンプル参照オーディオ（laffey.mp3 / AnAn.ogg）
@@ -526,17 +492,17 @@ export GSV_MIRROR=modelscope
 **Q1：マルチスピーカー機能が PyPI からインストールできない？**
 本リポジトリの MultiSpeakerTTS 機能はまだ PyPI に未公開です。本リポジトリから `pip install -e .` でインストールしてください。
 
-**Q2：初回実行のモデルダウンロードが遅い / 失敗する？**
-`GSV_MIRROR` 環境変数でミラーを強制指定するか（中国国内では `modelscope` を推奨）、モデルファイルをキャッシュディレクトリ（デフォルト `~/.cache/gsv`。構成は「初回実行」セクション参照）に手動配置してください。
-
-**Q3：CUDA グラフ関連のエラーが発生する？**
-多くは `gpt_cache` / `sovits_cache` の設定不備によるものです。デフォルト値に戻してください。MPS/CPU 環境ではこれらのパラメータは不要です。
-
-**Q4：特定の話者の VRAM/メモリ使用量が異常に高く、共有骨格になっていない？**
+**Q2：特定の話者の VRAM/メモリ使用量が異常に高く、共有骨格になっていない？**
 その話者のモデルアーキテクチャがベースモデルと互換性がない（例：v2 の `upsample_initial_channel=512` vs base `768`）ため、自動的に全量ロードへデグレードされています。ロードログに表示されます。ベースアーキテクチャ（v2ProPlus）に一致するファインチューニングモデルの使用を推奨します。
 
-**Q5：参照オーディオの内容を変更したのに、推論結果が変わらない？**
+**Q3：参照オーディオの内容を変更したのに、推論結果が変わらない？**
 話者/スタイル参照オーディオのキャッシュはパスをキーにしています——同じパスでファイル内容を差し替えると古いキャッシュにヒットします。内容変更後はキャッシュを削除（`del_spk_audio` / `del_prompt_audio`）するか、新しいファイルパスを使用してください。
+
+**Q4：初回実行のモデルダウンロードが遅い / 失敗する？**
+`GSV_MIRROR` 環境変数でミラーを強制指定するか（中国国内では `modelscope` を推奨）、モデルファイルをキャッシュディレクトリ（デフォルト `~/.cache/gsv`。構成は「初回実行」セクション参照）に手動配置してください。
+
+**Q5：CUDA グラフ関連のエラーが発生する？**
+多くは `gpt_cache` / `sovits_cache` の設定不備によるものです。デフォルト値に戻してください。MPS/CPU 環境ではこれらのパラメータは不要です。
 
 **Q6：モデルロード時に `weights_only=False` のセキュリティ警告が出る？**
 レガシーな GPT-SoVITS チェックポイントとの互換性のための意図的な動作です。信頼できるソースのモデルのみをロードするか、`tts.to_safetensors` で safetensors ディレクトリ形式に変換してリスクを排除してください。
@@ -556,7 +522,3 @@ export GSV_MIRROR=modelscope
 以下のプロジェクトに特別な感謝を表します：
 - [RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)
 - [chinokikiss/GSV-TTS-Lite](https://github.com/chinokikiss/GSV-TTS-Lite)
-
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=chinokikiss/GSV-TTS-Lite&type=Date)](https://star-history.com/#chinokikiss/GSV-TTS-Lite&Date)
