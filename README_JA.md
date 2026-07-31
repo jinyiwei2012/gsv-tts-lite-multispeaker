@@ -395,8 +395,8 @@ print("声紋類似度：", similarity)
 
 ```bash
 cd WebUI
-pip install -r requirements.txt
-python web.py
+pip install -r requirements.txt   # -e .. で本リポジトリの gsv_tts を自動インストール（MultiSpeakerTTS は PyPI 未公開）
+python web.py                     # オプション: --port 9881 / --use_asr / --models_dir ...
 ```
 
 > [!TIP]

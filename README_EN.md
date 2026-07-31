@@ -395,8 +395,8 @@ print("Speaker Similarity:", similarity)
 
 ```bash
 cd WebUI
-pip install -r requirements.txt
-python web.py
+pip install -r requirements.txt   # installs local gsv_tts via -e .. (MultiSpeakerTTS is not on PyPI)
+python web.py                     # optional args: --port 9881 / --use_asr / --models_dir ...
 ```
 
 > [!TIP]

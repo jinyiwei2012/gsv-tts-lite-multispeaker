@@ -1,7 +1,12 @@
-gsv-tts-lite
+# ⚠️ 多说话人（MultiSpeakerTTS）功能未发布到 PyPI，必须从本仓库根目录安装：
+# 下面的 -e .. 会从 WebUI 目录指向仓库根，自动安装本地的 gsv_tts 包
+-e ..
 
 pedalboard
 pyloudnorm
-gradio
-qwen-asr
+gradio>=4.44,<6
 psutil
+huggingface_hub
+
+# 可选：仅当使用 --use_asr 参数时需要（Qwen3-ASR 自动转录）
+qwen-asr

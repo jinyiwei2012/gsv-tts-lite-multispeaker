@@ -38,6 +38,7 @@ logging.getLogger('httpx').setLevel(logging.CRITICAL)
 # Module-level sentinel defaults — avoid NameError when module is imported
 # (e.g. Gradio reload).  Actual values are set in the __main__ block.
 GSV_ROOT_DIR: str | None = None
+USE_BERT: bool = True
 tts: TTS | None = None
 multi_tts: MultiSpeakerTTS | None = None
 asr = None
@@ -84,8 +85,6 @@ S1_MODEL_PATH = [
     "GPT_weights_v2",
     "GPT_weights_v2Pro",
     "GPT_weights_v2ProPlus",
-    "GPT_weights_v3",
-    "GPT_weights_v4",
 ]
 S2_MODEL_PATH = [
     "SoVITS_weights_v2",
@@ -275,12 +274,10 @@ def multi_add_speaker(
         return _render_speaker_table(), "❌ 请填写 GPT 和 SoVITS 模型路径"
     if not spk_audio:
         return _render_speaker_table(), "❌ 请上传音色参考音频"
+    if not prompt_text:
+        return _render_speaker_table(), "❌ 请填写风格参考文本（上传风格音频或复用音色参考时都需要）"
 
     try:
-        # Auto-initialize if not yet initialized
-        if multi_tts is None:
-            multi_tts = MultiSpeakerTTS(speakers=[], use_bert=True)
-
         spk = SpeakerConfig(
             name=name,
             gpt_model_path=gpt_path,
@@ -289,7 +286,14 @@ def multi_add_speaker(
             prompt_audio_path=prompt_audio or spk_audio,
             prompt_audio_text=prompt_text,
         )
-        multi_tts.add_speaker(spk)
+
+        # Auto-initialize on the first speaker — the core requires >= 1
+        # speaker at construction time (empty list raises ValueError).
+        if multi_tts is None:
+            multi_tts = MultiSpeakerTTS(speakers=[spk], use_bert=USE_BERT)
+        else:
+            multi_tts.add_speaker(spk)
+
         w = multi_tts._speakers[name]
         mode = "🔄 完整模型" if w.is_full_model else "✅ 共享骨干"
         _speaker_data.append({
@@ -316,16 +320,6 @@ def multi_remove_speaker(name):
         return _render_speaker_table(), f"✅ 角色 '{name}' 已移除"
     except Exception as e:
         return _render_speaker_table(), f"❌ 移除失败: {e}"
-
-
-def _render_speaker_table():
-    """Render speaker list table - returns data directly for Gradio 6.x"""
-    if not _speaker_data:
-        return []
-    return [
-        [s["name"], Path(s["gpt_path"]).name, Path(s["sovits_path"]).name, s["mode"]]
-        for s in _speaker_data
-    ]
 
 
 def _get_speaker_choices():
@@ -988,11 +982,12 @@ if __name__ == "__main__":
     parser.add_argument("--models_dir", type=str, help="预训练模型目录")
     parser.add_argument("--port", type=int, default=9881, help="Gradio 端口号")
     parser.add_argument("--share", action="store_true", help="是否开启公网分享")
-    parser.add_argument("--gsv_root_dir", type=str, default=".", help="原版GSV根目录，用于自动扫描模型")
+    parser.add_argument("--gsv_root_dir", type=str, default=str(project_root), help="原版GSV根目录，用于自动扫描模型（默认：仓库根）")
     
     args, _ = parser.parse_known_args()
 
     GSV_ROOT_DIR = args.gsv_root_dir
+    USE_BERT = args.use_bert
     PRESETS_DIR.mkdir(exist_ok=True)
     HISTORY_DIR.mkdir(exist_ok=True)
 
@@ -1031,12 +1026,13 @@ if __name__ == "__main__":
 
         # 4. 加载模型 (始终使用绝对路径)
         print(f"🚀 正在加载 ASR 模型...")
+        use_cuda = torch.cuda.is_available()
         asr = Qwen3ASRModel.from_pretrained(
             str(local_model_path),  # 传入绝对路径字符串
-            dtype=torch.bfloat16,
-            device_map="cuda:0",
-            attn_implementation="flash_attention_2" if args.use_flash_attn else None,
-            local_files_only=True 
+            dtype=torch.bfloat16 if use_cuda else torch.float32,
+            device_map="cuda:0" if use_cuda else "cpu",
+            attn_implementation="flash_attention_2" if (args.use_flash_attn and use_cuda) else None,
+            local_files_only=True,
         )
     else:
         asr = None

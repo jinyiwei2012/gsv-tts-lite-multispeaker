@@ -395,8 +395,8 @@ print("声纹相似度：", similarity)
 
 ```bash
 cd WebUI
-pip install -r requirements.txt
-python web.py
+pip install -r requirements.txt   # 自动以 -e .. 安装本仓库 gsv_tts（MultiSpeakerTTS 未发布至 PyPI）
+python web.py                     # 可选参数: --port 9881 / --use_asr / --models_dir ...
 ```
 
 > [!TIP]
