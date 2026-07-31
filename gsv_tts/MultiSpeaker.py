@@ -94,6 +94,29 @@ _SCRIPT_LINE_RE = re.compile(r"^([^:：]{1,32})[:：]\s*(.+)$", re.DOTALL)
 _SCRIPT_EMPTY_LINE_RE = re.compile(r"^[^:：]{1,32}[:：]$")
 
 
+def split_speaker_text(text: str, default_speaker: str) -> list[tuple[str, str]]:
+    """Split text into [(speaker, segment), ...] honoring <speaker:name> tags.
+
+    Plain text outside tags uses default_speaker. Empty segments are dropped.
+    Used by streaming synthesis (WebUI) to mix speakers per segment.
+    """
+    segments: list[tuple[str, str]] = []
+    pos = 0
+    for m in _SCRIPT_INLINE_TAG_RE.finditer(text):
+        if m.start() > pos:
+            plain = text[pos:m.start()].strip()
+            if plain:
+                segments.append((default_speaker, plain))
+        seg_text = m.group(2).strip()
+        if seg_text:
+            segments.append((m.group(1).strip(), seg_text))
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail:
+        segments.append((default_speaker, tail))
+    return segments
+
+
 def parse_script(script: str) -> list[tuple[str, str]]:
     """Parse a dialogue script into an ordered list of (speaker, text).
 

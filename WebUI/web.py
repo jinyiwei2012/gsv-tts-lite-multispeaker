@@ -32,6 +32,7 @@ if platform.system() == "Windows":
 
 from gsv_tts import TTS, AudioClip, MultiSpeakerTTS, SpeakerConfig, ConfigMismatchError
 from gsv_tts.model_discovery import discover_models
+from gsv_tts.MultiSpeaker import split_speaker_text
 
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -588,29 +589,6 @@ def _tts_multi_infer(speaker, text, top_k, top_p, temperature, rep_penalty,
     return (samplerate, audio_data), msg, history_entry
 
 
-def _parse_speaker_stream_segments(text, default_speaker):
-    """Split text into [(speaker, segment), ...] honoring <speaker:name> tags.
-
-    Plain text outside tags uses default_speaker. Empty segments are dropped.
-    """
-    segments = []
-    pattern = re.compile(r'<speaker:([^>]+)>(.*?)</speaker>', re.DOTALL)
-    pos = 0
-    for m in pattern.finditer(text):
-        if m.start() > pos:
-            plain = text[pos:m.start()].strip()
-            if plain:
-                segments.append((default_speaker, plain))
-        seg_text = m.group(2).strip()
-        if seg_text:
-            segments.append((m.group(1).strip(), seg_text))
-        pos = m.end()
-    tail = text[pos:].strip()
-    if tail:
-        segments.append((default_speaker, tail))
-    return segments
-
-
 def tts_stream_request(
     multi_spk_files, spk_weights,
     prompt_audio, prompt_text,
@@ -636,7 +614,7 @@ def tts_stream_request(
             if mode == "多角色" and multi_tts is not None:
                 if "<speaker:" in text:
                     # 混合角色：按标签逐段流式，每段用对应角色
-                    segments = _parse_speaker_stream_segments(text, multi_cur_speaker)
+                    segments = split_speaker_text(text, multi_cur_speaker)
                     if not segments:
                         yield None, "⚠️ 未能解析出有效文本", None
                         return

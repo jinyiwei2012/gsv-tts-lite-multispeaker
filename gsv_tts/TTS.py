@@ -1501,7 +1501,6 @@ class TTS:
         """
         return list(self.sovits_models.keys())
     
-    @torch.inference_mode()
     @staticmethod
     def _file_stat(path: str):
         """(mtime, size) fingerprint for local files; None for non-file keys

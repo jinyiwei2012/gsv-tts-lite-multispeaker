@@ -43,3 +43,9 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 include = ["gsv_tts*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# test_sovits_sharing.py 是需真实模型/网络的脚本式测试，仅手动运行
+addopts = "--ignore=tests/test_sovits_sharing.py"

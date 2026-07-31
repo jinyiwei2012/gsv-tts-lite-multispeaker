@@ -13,10 +13,32 @@ _SKIP_DIRS = {
     "site-packages", ".idea", ".vscode",
 }
 
+# Feature words stripped from normalized filenames before comparison,
+# so "bob_gpt.ckpt" + "bob_sovits.pth" pair despite a short common prefix.
+_FEATURE_WORDS = ("gpt", "sovits", "model", "t2s", "ckpt", "pth")
+
 
 def normalize(name: str) -> str:
     """Lowercase alphanumeric-only form used for filename comparison."""
     return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _strip_features(s: str) -> str:
+    for w in _FEATURE_WORDS:
+        s = s.replace(w, "")
+    return s
+
+
+def pair_score(gpt: Path, sovits: Path) -> int:
+    """Similarity score between a GPT and a SoVITS model filename.
+
+    Equal names after stripping feature words score very high (strong pair);
+    otherwise the normalized common-prefix length is used.
+    """
+    gn, sn = normalize(gpt.stem), normalize(sovits.stem)
+    if _strip_features(gn) == _strip_features(sn):
+        return 1_000_000
+    return common_prefix_len(gn, sn)
 
 
 def common_prefix_len(a: str, b: str) -> int:
@@ -58,7 +80,7 @@ def discover_models(dirs: list[Path], min_prefix: int = 4):
         sn = normalize(sovits.stem)
         best, best_score = None, 0
         for gpt in unmatched:
-            score = common_prefix_len(normalize(gpt.stem), sn)
+            score = pair_score(gpt, sovits)
             if score > best_score:
                 best, best_score = gpt, score
         if best is not None and best_score >= min_prefix:
