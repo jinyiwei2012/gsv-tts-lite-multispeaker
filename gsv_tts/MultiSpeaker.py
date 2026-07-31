@@ -10,11 +10,13 @@ Core idea:
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import contextmanager
 from collections import defaultdict
 from pathlib import Path
 from typing import Generator, Literal
 
+import numpy as np
 import torch
 
 from .TTS import TTS
@@ -85,6 +87,51 @@ def _resolve_param(model: torch.nn.Module, param_path: str) -> torch.nn.Paramete
     if not isinstance(obj, torch.nn.Parameter):
         raise TypeError(f"Expected nn.Parameter at '{param_path}', got {type(obj)}")
     return obj
+
+
+_SCRIPT_INLINE_TAG_RE = re.compile(r"<speaker:([^>]+)>(.*?)</speaker>", re.DOTALL)
+_SCRIPT_LINE_RE = re.compile(r"^([^:：]{1,32})[:：]\s*(.+)$", re.DOTALL)
+_SCRIPT_EMPTY_LINE_RE = re.compile(r"^[^:：]{1,32}[:：]$")
+
+
+def parse_script(script: str) -> list[tuple[str, str]]:
+    """Parse a dialogue script into an ordered list of (speaker, text).
+
+    Supported formats:
+      - ``speaker: text`` lines (full-width ``：`` also accepted)
+      - Inline tags: ``<speaker:name>text</speaker>`` (each tag becomes an entry)
+
+    Raises:
+        ValueError: On a non-empty line that matches neither format.
+    """
+    entries: list[tuple[str, str]] = []
+    for raw_line in script.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "<speaker:" in line:
+            matched = False
+            for m in _SCRIPT_INLINE_TAG_RE.finditer(line):
+                seg = m.group(2).strip()
+                if seg:
+                    entries.append((m.group(1).strip(), seg))
+                    matched = True
+            if matched:
+                continue
+        m = _SCRIPT_LINE_RE.match(line)
+        if m:
+            text = m.group(2).strip()
+            if text:
+                entries.append((m.group(1).strip(), text))
+            continue
+        # 形如 "alice:" 的空台词行 → 跳过
+        if _SCRIPT_EMPTY_LINE_RE.match(line):
+            continue
+        raise ValueError(
+            f"Cannot parse script line: {raw_line!r} "
+            "(expected 'speaker: text' or <speaker:name>text</speaker>)"
+        )
+    return entries
 
 
 class MultiSpeakerTTS:
@@ -827,6 +874,91 @@ class MultiSpeakerTTS:
                                 all_results[orig_idx] = audio
 
         return all_results  # type: ignore[return-value]
+
+    # ==================================================================
+    # Script (dialogue) mode
+    # ==================================================================
+
+    def infer_script(
+        self,
+        script: str,
+        text_language: Literal["auto", "ja", "zh", "en"] | list = "auto",
+        prompt_language: Literal["auto", "ja", "zh", "en"] | list = "auto",
+        return_subtitles: bool = True,
+        top_k: int = 15,
+        top_p: float = 1.0,
+        temperature: float = 1.0,
+        repetition_penalty: float = 1.35,
+        noise_scale: float = 0.5,
+        speed: float = 1.0,
+        bert_batch_size: int = 20,
+        sovits_batch_size: int = 10,
+    ) -> tuple[AudioClip, list[dict]]:
+        """Synthesize a multi-speaker dialogue script.
+
+        Script format — one ``speaker: line`` per line (full-width ``：`` also
+        accepted), e.g.::
+
+            alice: こんにちは！
+            bob: よろしくお願いします。
+            alice: 今日も頑張りましょう！
+
+        Inline ``<speaker:name>text</speaker>`` tags are also supported.
+
+        Args:
+            script: The dialogue script.
+            text_language / prompt_language: A single language or a per-line
+                list (must match the number of parsed lines).
+            Other args match ``infer_batched``.
+
+        Returns:
+            (concatenated AudioClip, timeline). The clip's ``subtitles`` carry
+            an extra ``"speaker"`` field per entry; the timeline is a list of
+            ``{"speaker", "text", "start_s", "end_s"}`` per line.
+        """
+        entries = parse_script(script)
+        if not entries:
+            raise ValueError("Empty script — nothing to synthesize")
+
+        audios = self.infer_batched(
+            entries,
+            text_languages=text_language,
+            prompt_languages=prompt_language,
+            return_subtitles=return_subtitles,
+            top_k=top_k, top_p=top_p, temperature=temperature,
+            repetition_penalty=repetition_penalty,
+            noise_scale=noise_scale, speed=speed,
+            bert_batch_size=bert_batch_size,
+            sovits_batch_size=sovits_batch_size,
+        )
+
+        samplerate = audios[0].samplerate
+        audio_data = np.concatenate([a.audio_data for a in audios])
+        total_len = sum(a.audio_len_s for a in audios)
+
+        timeline: list[dict] = []
+        merged_subtitles: list[dict] = []
+        offset = 0.0
+        for (spk, text), clip in zip(entries, audios):
+            end = offset + clip.audio_len_s
+            timeline.append({
+                "speaker": spk, "text": text,
+                "start_s": offset, "end_s": end,
+            })
+            if clip.subtitles:
+                for s in clip.subtitles:
+                    shifted = dict(s)
+                    shifted["start_s"] = s["start_s"] + offset
+                    shifted["end_s"] = s["end_s"] + offset
+                    shifted["speaker"] = spk
+                    merged_subtitles.append(shifted)
+            offset = end
+
+        clip = AudioClip(
+            self.audio_queue, audio_data, samplerate, total_len,
+            merged_subtitles or None, script,
+        )
+        return clip, timeline
 
     def infer_stream(
         self,
