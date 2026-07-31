@@ -31,7 +31,6 @@ Usage:
 import argparse
 import gc
 import os
-import re
 import sys
 import time
 from pathlib import Path
@@ -41,16 +40,12 @@ import psutil
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gsv_tts import TTS, MultiSpeakerTTS, SpeakerConfig
+from gsv_tts.model_discovery import discover_models, auto_name
 
 DEFAULT_TEXT = "今日も頑張りましょう、一緒に歩いていこう。"
 SPK_AUDIO = "examples/laffey.mp3"
 PROMPT_AUDIO = "examples/AnAn.ogg"
 PROMPT_TEXT = "ちが……ちがう。レイア、貴様は間違っている。"
-
-_SKIP_DIRS = {
-    ".git", "__pycache__", ".venv", "venv", "node_modules",
-    "site-packages", ".idea", ".vscode",
-}
 
 
 def rss_gb() -> float:
@@ -63,58 +58,6 @@ def timed(fn, label):
     dt = time.time() - t0
     print(f"  {label}: {dt:.1f}s", flush=True)
     return result, dt
-
-
-def _normalize(name: str) -> str:
-    """Lowercase alphanumeric-only form used for filename comparison."""
-    return re.sub(r"[^a-z0-9]", "", name.lower())
-
-
-def _common_prefix_len(a: str, b: str) -> int:
-    n = 0
-    for x, y in zip(a, b):
-        if x != y:
-            break
-        n += 1
-    return n
-
-
-def _auto_name(gpt: Path, sovits: Path) -> str:
-    common = os.path.commonprefix([gpt.stem, sovits.stem]).rstrip("-_ .")
-    return common or gpt.stem
-
-
-def discover_models(dirs: list[Path], min_prefix: int = 4):
-    """Pair *.ckpt (GPT) with *.pth (SoVITS) by normalized filename prefix.
-
-    Greedy: for each .pth, take the not-yet-paired .ckpt with the longest
-    common prefix (>= min_prefix). Returns list of (gpt_path, sovits_path,
-    speaker_name).
-    """
-    gpt_files, sovits_files = [], []
-    for d in dirs:
-        for root, dirnames, filenames in os.walk(d):
-            dirnames[:] = [x for x in dirnames if x not in _SKIP_DIRS]
-            for fn in filenames:
-                p = Path(root) / fn
-                if fn.endswith(".ckpt"):
-                    gpt_files.append(p)
-                elif fn.endswith(".pth"):
-                    sovits_files.append(p)
-
-    pairs = []
-    unmatched = sorted(gpt_files)
-    for sovits in sorted(sovits_files):
-        sn = _normalize(sovits.stem)
-        best, best_score = None, 0
-        for gpt in unmatched:
-            score = _common_prefix_len(_normalize(gpt.stem), sn)
-            if score > best_score:
-                best, best_score = gpt, score
-        if best is not None and best_score >= min_prefix:
-            unmatched.remove(best)
-            pairs.append((best, sovits, _auto_name(best, sovits)))
-    return pairs
 
 
 def parse_args(argv=None):

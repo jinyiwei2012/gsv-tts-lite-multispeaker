@@ -31,6 +31,7 @@ if platform.system() == "Windows":
     p.nice(psutil.HIGH_PRIORITY_CLASS)
 
 from gsv_tts import TTS, AudioClip, MultiSpeakerTTS, SpeakerConfig, ConfigMismatchError
+from gsv_tts.model_discovery import discover_models
 
 logging.getLogger('asyncio').setLevel(logging.CRITICAL)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
@@ -329,6 +330,37 @@ def _get_speaker_choices():
 def _get_remove_choices():
     names = [s["name"] for s in _speaker_data]
     return gr.update(choices=names)
+
+
+# ── Model scanning (shared with benchmarks) ──
+_scan_pairs: dict[str, tuple[Path, Path]] = {}
+
+
+def multi_scan_models(scan_dir):
+    """Scan a directory for paired .ckpt/.pth models, fill the discovery dropdown."""
+    global _scan_pairs
+    if not scan_dir or not str(scan_dir).strip():
+        scan_dir = str(project_root)
+    try:
+        pairs = discover_models([Path(str(scan_dir).strip())])
+    except OSError as e:
+        return gr.update(choices=[], value=None), f"❌ 扫描失败: {e}"
+    if not pairs:
+        _scan_pairs = {}
+        return gr.update(choices=[], value=None), "❌ 未发现可配对的 .ckpt/.pth 模型，请检查目录"
+    _scan_pairs = {name: (gpt, sovits) for gpt, sovits, name in pairs}
+    return (
+        gr.update(choices=list(_scan_pairs), value=list(_scan_pairs)[0]),
+        f"✅ 发现 {len(pairs)} 个角色模型，选择后点击「📥 填入表单」",
+    )
+
+
+def multi_apply_scan(name):
+    """Fill the add-speaker form from a discovered model pair."""
+    if not name or name not in _scan_pairs:
+        return gr.update(), gr.update(), ""
+    gpt, sovits = _scan_pairs[name]
+    return gr.update(value=str(gpt)), gr.update(value=str(sovits)), name
 
 
 def vc_request(
@@ -730,6 +762,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                         multi_gpt = gr.Textbox(label="GPT 模型 (.ckpt)", placeholder="路径或留空扫描", scale=2)
                         multi_sovits = gr.Textbox(label="SoVITS 模型 (.pth)", placeholder="路径或留空扫描", scale=2)
 
+                    # ── Model scanning ──
+                    with gr.Row():
+                        multi_scan_dir = gr.Textbox(label="模型扫描目录", placeholder="留空默认仓库根", scale=2)
+                        multi_scan_btn = gr.Button("🔍 扫描角色模型", size="sm", scale=1)
+                        multi_scan_drop = gr.Dropdown(label="发现结果（选择后填入表单）", choices=[], scale=2)
+                        multi_scan_apply = gr.Button("📥 填入表单", size="sm", scale=1)
+
                     with gr.Row():
                         multi_spk_audio = gr.Audio(label="音色参考音频", type="filepath", scale=2)
                         multi_prompt_audio = gr.Audio(label="风格参考音频 (可选)", type="filepath", scale=2)
@@ -1003,6 +1042,17 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     # ── Multi-speaker management events ──
     def _refresh_multi_ui():
         return _get_speaker_choices(), _get_remove_choices()
+
+    multi_scan_btn.click(
+        fn=multi_scan_models,
+        inputs=[multi_scan_dir],
+        outputs=[multi_scan_drop, log_output],
+    )
+    multi_scan_apply.click(
+        fn=multi_apply_scan,
+        inputs=[multi_scan_drop],
+        outputs=[multi_gpt, multi_sovits, multi_name],
+    )
 
     multi_add_btn.click(
         fn=multi_add_speaker,
