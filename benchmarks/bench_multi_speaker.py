@@ -30,6 +30,7 @@ Usage:
 
 import argparse
 import gc
+import json
 import os
 import sys
 import time
@@ -96,6 +97,10 @@ def parse_args(argv=None):
     parser.add_argument(
         "--min-prefix", type=int, default=4, metavar="N",
         help="min filename prefix length for auto pairing (default: 4)",
+    )
+    parser.add_argument(
+        "--output", type=str, default=None, metavar="JSON",
+        help="write a JSON report of the benchmark results",
     )
     return parser.parse_args(argv)
 
@@ -262,7 +267,47 @@ def main():
         rtf_b = results_b[pairs[0][0]][1] / audio_len
         print(f"RTF shared: {rtf_a:.3f} | RTF full: {rtf_b:.3f}", flush=True)
     else:
+        rtf_b = None
         print(f"RTF shared: {rtf_a:.3f}", flush=True)
+
+    # ── JSON report ──
+    if args.output:
+        report = {
+            "meta": {
+                "n_speakers": n,
+                "avg_reps": args.avg,
+                "text": text,
+                "no_full": args.no_full,
+            },
+            "init_s": {
+                "shared": init_a,
+                "full": sum(v[1] for v in instances.values()) if not args.no_full else None,
+            },
+            "peak_rss_gb": {
+                "shared": rss_a,
+                "full": rss_b if not args.no_full else None,
+            },
+            "speakers": {},
+            "rtf": {"shared": rtf_a, "full": rtf_b},
+            "audio_len_s": audio_len,
+        }
+        for name, gpt, sovits in pairs:
+            wa, aa = results_a[name]
+            entry = {
+                "gpt_model": gpt,
+                "sovits_model": sovits,
+                "mode": "shared" if not mtts._speakers[name].is_full_model else "full_degraded",
+                "warmup_s": wa,
+                "avg_s": aa,
+            }
+            if not args.no_full:
+                wb, ab = results_b[name]
+                entry["full_avg_s"] = ab
+                entry["speedup_x"] = round(ab / aa, 3) if aa > 0 else None
+            report["speakers"][name] = entry
+        with open(args.output, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"\nReport written to: {args.output}", flush=True)
 
 
 if __name__ == "__main__":
