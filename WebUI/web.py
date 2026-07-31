@@ -433,22 +433,31 @@ def tts_request(
             noise_scale=noise_scale,
             speed=speed,
             sovits_batch_size=sovits_batch_size,
+            return_subtitles=True,
         )
 
         samplerate = audios[0].samplerate
         audio_data = []
         audio_len_s = 0
+        all_subtitles = []
+        offset = 0.0
         for i in range(len(cut_texts)):
             if tags[i] == "break":
-                audio_data.append(np.zeros((int(cut_texts[i] * samplerate),)))
-                audio_len_s += cut_texts[i]
+                offset += cut_texts[i]
             else:
                 tmp_audio = audios[orig_idx.index(i)]
                 audio_data.append(tmp_audio.audio_data)
                 audio_len_s += tmp_audio.audio_len_s
+                if tmp_audio.subtitles:
+                    for s in tmp_audio.subtitles:
+                        shifted = dict(s)
+                        shifted["start_s"] = s["start_s"] + offset
+                        shifted["end_s"] = s["end_s"] + offset
+                        all_subtitles.append(shifted)
+                offset += tmp_audio.audio_len_s
 
         audio_data = np.concatenate(audio_data)
-        audio = AudioClip(None, audio_data, samplerate, audio_len_s, None, None)
+        audio = AudioClip(None, audio_data, samplerate, audio_len_s, all_subtitles or None, None)
 
         if enable_enhance:
             audio.audio_data = enhance_audio(audio.audio_data, audio.samplerate)
@@ -467,6 +476,8 @@ def tts_request(
         filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.wav"
         save_path = HISTORY_DIR / filename
         audio.save(str(save_path))
+        if all_subtitles:
+            audio.export_subtitles(str(save_path)[:-4] + ".srt")
         history_entry = [datetime.now().strftime("%H:%M:%S"), text[:20] + "...", str(save_path)]
 
         return (audio.samplerate, audio.audio_data), msg, history_entry

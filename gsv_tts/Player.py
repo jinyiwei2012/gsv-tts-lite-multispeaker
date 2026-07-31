@@ -15,6 +15,24 @@ except ImportError:
 _SENTINEL = object()
 
 
+def _format_srt_ts(seconds: float) -> str:
+    """Format seconds as SRT timestamp: HH:MM:SS,mmm."""
+    ms = max(0, int(round(seconds * 1000)))
+    h, rem = divmod(ms, 3600000)
+    m, rem = divmod(rem, 60000)
+    s, ms = divmod(rem, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def _format_ass_ts(seconds: float) -> str:
+    """Format seconds as ASS timestamp: H:MM:SS.cc."""
+    cs = max(0, int(round(seconds * 100)))
+    h, rem = divmod(cs, 360000)
+    m, rem = divmod(rem, 6000)
+    s, cs = divmod(rem, 100)
+    return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
+
+
 class AudioQueue:
     def __init__(self, samplerate):
         self.samplerate = samplerate
@@ -136,3 +154,68 @@ class AudioClip:
             subtitles_path = subtitles_path + ".json"
             with open(subtitles_path, 'w', encoding='utf-8') as f:
                 json.dump({"orig_text":self.orig_text, "subtitles":self.subtitles}, f, indent=4, ensure_ascii=False)
+
+    def export_subtitles(self, save_path: str, fmt: str = "srt"):
+        """Exports character-level subtitles to an SRT or ASS file.
+
+        Args:
+            save_path: Output subtitle file path (e.g. "out.srt" / "out.ass").
+            fmt: "srt" or "ass".
+
+        Returns:
+            The path the subtitles were written to.
+
+        Raises:
+            ValueError: If this clip has no subtitles (inference was run
+                without ``return_subtitles=True``), or the format is unknown.
+        """
+        if not self.subtitles:
+            raise ValueError(
+                "No subtitles available. Re-run inference with return_subtitles=True."
+            )
+
+        subs = sorted(self.subtitles, key=lambda s: s.get("start_s", 0.0))
+
+        if fmt == "srt":
+            lines = []
+            for i, s in enumerate(subs, 1):
+                lines.append(
+                    f"{i}\n"
+                    f"{_format_srt_ts(s['start_s'])} --> {_format_srt_ts(s['end_s'])}\n"
+                    f"{s['text']}\n"
+                )
+            content = "\n".join(lines)
+        elif fmt == "ass":
+            header = (
+                "[Script Info]\n"
+                "ScriptType: v4.00+\n"
+                "PlayResX: 384\n"
+                "PlayResY: 288\n"
+                "WrapStyle: 0\n"
+                "\n"
+                "[V4+ Styles]\n"
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+                "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+                "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+                "Alignment, MarginL, MarginR, MarginV, Encoding\n"
+                "Style: Default,Microsoft YaHei,36,&H00FFFFFF,&H000000FF,"
+                "&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,2,0,2,20,20,24,1\n"
+                "\n"
+                "[Events]\n"
+                "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
+            )
+            events = []
+            for s in subs:
+                text = str(s["text"]).replace("\n", "\\N")
+                events.append(
+                    "Dialogue: 0,"
+                    f"{_format_ass_ts(s['start_s'])},{_format_ass_ts(s['end_s'])},"
+                    f"Default,,0,0,0,,{text}"
+                )
+            content = header + "\n".join(events) + "\n"
+        else:
+            raise ValueError(f"Unsupported subtitle format: {fmt}")
+
+        with open(save_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return save_path
