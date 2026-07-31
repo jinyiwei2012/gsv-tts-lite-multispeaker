@@ -183,6 +183,38 @@ def download_model(filename, dir, download_url=None):
     zip_filename.unlink(missing_ok=True)
 
 
+def _download_zip_with_fallback(dir, candidates):
+    """Download and extract a zip from the first working candidate.
+
+    Args:
+        dir: Destination directory (created if missing).
+        candidates: Iterable of (url_template, filename) tried in order.
+
+    Returns:
+        The (url, filename) that succeeded, or None if all failed.
+    """
+    os.makedirs(dir, exist_ok=True)
+    for url, filename in candidates:
+        zip_path = Path(dir) / filename
+        if zip_path.exists():
+            # 残留 zip：先尝试直接解压；损坏则删除并重新下载
+            try:
+                unzip_file(zip_path, dir)
+                zip_path.unlink(missing_ok=True)
+                return (url, filename)
+            except Exception as e:
+                logging.warning(f"Existing zip is corrupt ({zip_path}): {e}")
+                zip_path.unlink(missing_ok=True)
+        try:
+            if download_file(url % filename, zip_path):
+                unzip_file(zip_path, dir)
+                zip_path.unlink(missing_ok=True)
+                return (url, filename)
+        except Exception as e:
+            logging.warning(f"Download failed from {url} ({filename}): {e}")
+    return None
+
+
 def check_pretrained_models(models_dir):
     model_list = [
         Path(models_dir) / "chinese-hubert-base",
@@ -190,49 +222,37 @@ def check_pretrained_models(models_dir):
         Path(models_dir) / "sv",
     ]
 
-    is_download = False
-    for model_path in model_list:
-        if not os.path.exists(model_path):
-            is_download = True
-            break
-    
-    if is_download:
-        base = get_base_url()
+    if all(os.path.exists(model_path) for model_path in model_list):
+        return
 
-        os.makedirs(models_dir, exist_ok=True)
+    base = get_base_url()
+    os.makedirs(models_dir, exist_ok=True)
 
-        if base == modelscope_base_url:
-            download_model(
-                download_url=base,
-                filename="pretrained_models5.zip",
-                dir=models_dir,
-            )
+    def zip_name_for(url):
+        # ModelScope 的 5.zip 内置 g2p；HF 系的 6.zip 需要单独下载 g2p.zip
+        return "pretrained_models5.zip" if url == modelscope_base_url else "pretrained_models6.zip"
 
-        elif base == huggingface_base_url:
-            download_model(
-                download_url=base,
-                filename="pretrained_models6.zip",
-                dir=models_dir,
-            )
+    # 主 zip 带镜像 fallback 链：主源失败后依次尝试其他镜像（换对应文件名）
+    candidates = [(base, zip_name_for(base))]
+    for _, url in (("HuggingFace", huggingface_base_url), ("HF-Mirror", hf_mirror_base_url), ("ModelScope", modelscope_base_url)):
+        if url != base:
+            candidates.append((url, zip_name_for(url)))
 
-            download_model(
-                download_url="https://github.com/chinokikiss/GSV-TTS-Lite/releases/download/g2p/%s",
-                filename="g2p.zip",
-                dir=models_dir,
-            )
+    used = _download_zip_with_fallback(models_dir, candidates)
+    if used is None:
+        raise RuntimeError(
+            "Failed to download pretrained models from all mirrors. "
+            f"Please download manually and place the files under {models_dir}"
+        )
 
-        else:
-            # hf-mirror or any other: download same zip as HF
-            download_model(
-                download_url=base,
-                filename="pretrained_models6.zip",
-                dir=models_dir,
-            )
-
-            download_model(
-                download_url="https://github.com/chinokikiss/GSV-TTS-Lite/releases/download/g2p/%s",
-                filename="g2p.zip",
-                dir=models_dir,
+    # pretrained_models5.zip (ModelScope) 已内置 g2p；6.zip 需要单独从 GitHub 下载
+    used_modelscope_zip = used[0] == modelscope_base_url
+    if not used_modelscope_zip and not os.path.exists(Path(models_dir) / "g2p"):
+        g2p_url = "https://github.com/chinokikiss/GSV-TTS-Lite/releases/download/g2p/%s"
+        if _download_zip_with_fallback(models_dir, [(g2p_url, "g2p.zip")]) is None:
+            raise RuntimeError(
+                "Failed to download g2p.zip. "
+                f"Please download manually and place it under {models_dir}"
             )
 
 
