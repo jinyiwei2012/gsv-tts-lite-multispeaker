@@ -484,6 +484,7 @@ def tts_request(
     sovits_batch_size,
     text_language, prompt_language,
     mode, multi_cur_speaker,
+    out_format="wav",
 ):
     """Unified TTS inference — routes to single-model or multi-speaker engine."""
     try:
@@ -496,6 +497,7 @@ def tts_request(
                 top_k, top_p, temperature, rep_penalty, noise_scale, speed,
                 enable_enhance, start_time,
                 text_language, prompt_language,
+                out_format=out_format,
             )
 
         # ── Single-model mode (original logic) ──
@@ -586,7 +588,7 @@ def tts_request(
             f"RTF: {rtf:.3f}"
         )
 
-        filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.wav"
+        filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.{out_format}"
         save_path = HISTORY_DIR / filename
         audio.save(str(save_path))
         if all_subtitles:
@@ -603,7 +605,8 @@ def tts_request(
 
 def _tts_multi_infer(speaker, text, top_k, top_p, temperature, rep_penalty,
                      noise_scale, speed, enable_enhance, start_time,
-                     text_language="auto", prompt_language="auto"):
+                     text_language="auto", prompt_language="auto",
+                     out_format="wav"):
     """Multi-speaker inference backend (called from tts_request)."""
     # Parse <speaker:name> tags for multi-speaker mixing
     tagged = re.findall(r'<speaker:([^>]+)>(.*?)</speaker>', text, re.DOTALL)
@@ -660,7 +663,7 @@ def _tts_multi_infer(speaker, text, top_k, top_p, temperature, rep_penalty,
            f"音频时长: {audio_len_s:.2f}s | "
            f"推理耗时: {infer_duration:.2f}s | RTF: {rtf:.3f}")
 
-    filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.wav"
+    filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.{out_format}"
     save_path = HISTORY_DIR / filename
     import soundfile as sf
     sf.write(str(save_path), audio_data, samplerate)
@@ -677,6 +680,7 @@ def tts_stream_request(
     enable_enhance,
     text_language, prompt_language,
     mode, multi_cur_speaker,
+    out_format="wav",
 ):
     """Streaming inference (generator) — token-level streaming for both engines.
 
@@ -771,7 +775,7 @@ def tts_stream_request(
                    f"音频时长: {audio_len_s:.2f}s | "
                    f"推理耗时: {infer_duration:.2f}s | RTF: {rtf:.3f}")
 
-            filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.wav"
+            filename = f"result_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}.{out_format}"
             save_path = HISTORY_DIR / filename
             import soundfile as sf
             sf.write(str(save_path), audio_data, samplerate)
@@ -877,6 +881,12 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                         info="多角色模式支持 <speaker:角色名>文本</speaker:角色名> 标签",
                     )
                     enable_enhance = gr.Checkbox(label="启用音频增强", value=False)
+                    out_format = gr.Radio(
+                        choices=["wav", "ogg"],
+                        value="wav",
+                        label="输出格式",
+                        info="ogg 体积更小（需要 soundfile 支持，一般自带）",
+                    )
 
                     with gr.Accordion("生成参数", open=False):
                         speed = gr.Slider(0.5, 2.0, 1.0, step=0.1, label="语速")
@@ -1063,6 +1073,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             sovits_batch_size,
             text_language, prompt_language,
             tts_mode, multi_cur_speaker,
+            out_format,
         ],
         outputs=[output_audio, log_output, temp_history_entry]
     ).then(
@@ -1081,6 +1092,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             enable_enhance,
             text_language, prompt_language,
             tts_mode, multi_cur_speaker,
+            out_format,
         ],
         outputs=[output_audio, log_output, temp_history_entry]
     ).then(
