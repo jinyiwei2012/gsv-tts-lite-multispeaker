@@ -16,21 +16,6 @@
     GPT-SoVITS 多角色共享骨干推理引擎（MultiSpeakerTTS）
   </p>
 
-  <p align="center">
-      <a href="LICENSE">
-        <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License">
-      </a>
-      <a href="https://www.python.org/">
-        <img src="https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white" alt="Python Version">
-      </a>
-      <a href="https://github.com/chinokikiss/GSV-TTS-Lite/stargazers">
-        <img src="https://img.shields.io/github/stars/chinokikiss/GSV-TTS-Lite?style=for-the-badge&color=yellow&logo=github" alt="GitHub stars">
-      </a>
-      <a href="https://pepy.tech/project/gsv-tts-lite">
-        <img src="https://img.shields.io/pepy/dt/gsv-tts-lite?style=for-the-badge&color=brightgreen" alt="Downloads">
-      </a>
-  </p>
-
   <p>
     <a href="README_EN.md">
       <img src="https://img.shields.io/badge/English-66ccff?style=flat-square&logo=github&logoColor=white" alt="English">
@@ -48,9 +33,11 @@
 
 ## 关于项目 (About)
 
-**GSV-TTS-Lite** 是基于 **GPT-SoVITS (V2/V2Pro/V2ProPlus)** 的高性能推理引擎，通过 CUDA Graph、Nested KV Cache、Continuous Batching 等深度优化，实现毫秒级实时合成（相比原版 3x~4x 提速、显存减半）。
+本仓库是 **GSV-TTS-Lite 的多说话人（MultiSpeaker）独立开发仓库**，核心能力是 **MultiSpeakerTTS 多角色共享骨干推理**：
 
-本仓库的核心是 **MultiSpeakerTTS 多角色共享骨干推理**：用**一套** GPT+SoVITS 骨干同时承载多个微调角色，每个角色仅注入约 5-15% 的轻量专属权重，即可节省 **40%~75%** 的显存/内存——**角色越多，节省越大**。
+传统方案为每个角色加载一套完整模型，显存/内存随角色数量线性增长；本仓库仅加载**一套共享 GPT+SoVITS 骨干**，每个角色只注入约 5-15% 的轻量专属权重（约 25 GPT keys + 37 SoVITS keys），按角色名**动态切换、零开销**——多角色场景显存/内存节省 **40%~75%**，**角色越多节省越大**。
+
+同时保留完整单说话人推理能力（`TTS`）：Token 级流式、批量并行、字级时间戳、零样本音色迁移、声纹识别，并提供 **WebUI** 与 **API** 服务。
 
 支持语言：**中日英**；支持模型：**V2**、**V2Pro**、**V2ProPlus**。
 

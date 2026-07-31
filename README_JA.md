@@ -16,21 +16,6 @@
     GPT-SoVITS マルチスピーカー共有骨格推論エンジン（MultiSpeakerTTS）
   </p>
 
-  <p align="center">
-      <a href="LICENSE">
-        <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License">
-      </a>
-      <a href="https://www.python.org/">
-        <img src="https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white" alt="Python Version">
-      </a>
-      <a href="https://github.com/chinokikiss/GSV-TTS-Lite/stargazers">
-        <img src="https://img.shields.io/github/stars/chinokikiss/GSV-TTS-Lite?style=for-the-badge&color=yellow&logo=github" alt="GitHub stars">
-      </a>
-      <a href="https://pepy.tech/project/gsv-tts-lite">
-        <img src="https://img.shields.io/pepy/dt/gsv-tts-lite?style=for-the-badge&color=brightgreen" alt="Downloads">
-      </a>
-  </p>
-
   <p>
     <a href="README_EN.md">
       <img src="https://img.shields.io/badge/English-66ccff?style=flat-square&logo=github&logoColor=white" alt="English">
@@ -48,9 +33,11 @@
 
 ## プロジェクトについて (About)
 
-**GSV-TTS-Lite** は **GPT-SoVITS (V2/V2Pro/V2ProPlus)** に基づく高性能推論エンジンです。CUDA Graph、Nested KV Cache、Continuous Batching などの深層最適化により、ミリ秒級のリアルタイム合成を実現します（原版比 3x~4x 高速、VRAM 半減）。
+本リポジトリは **GSV-TTS-Lite のマルチスピーカー（MultiSpeaker）独立開発リポジトリ**であり、コア機能は **MultiSpeakerTTS マルチスピーカー共有骨格推論**です：
 
-本リポジトリのコアは **MultiSpeakerTTS マルチスピーカー共有骨格推論**です：**1 セットの** GPT+SoVITS 骨格で複数のファインチューニングされた話者を同時に担い、各話者はわずか ~5-15% の軽量な専用重みを注入するだけで、**40%~75%** の VRAM/メモリを節約できます——**話者が多ければ多いほど節約効果は大きくなります**。
+従来方式では話者ごとに完全なモデルをロードするため、VRAM/メモリは話者数に比例して増加します。本リポジトリでは**1 セットの共有 GPT+SoVITS 骨格**のみをロードし、各話者はわずか ~5-15% の軽量な専用重み（約 25 GPT keys + 37 SoVITS keys）を注入するだけで、話者名に応じて**ゼロコストで動的切り替え**できます——マルチスピーカー環境では VRAM/メモリを **40%~75%** 節約でき、**話者が多ければ多いほど効果的**です。
+
+単一話者推論（`TTS`）の全機能も備えています：Token レベルストリーミング、バッチ並列、文字単位タイムスタンプ、ゼロショット音色変換、声紋認識、そして **WebUI** と **API** サービスに対応。
 
 対応言語：**中国語、日本語、英語**。対応モデル：**V2**、**V2Pro**、**V2ProPlus**。
 

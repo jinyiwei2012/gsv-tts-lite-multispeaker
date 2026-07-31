@@ -16,21 +16,6 @@
     Multi-speaker shared-backbone inference engine for GPT-SoVITS (MultiSpeakerTTS)
   </p>
 
-  <p align="center">
-      <a href="LICENSE">
-        <img src="https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge" alt="License">
-      </a>
-      <a href="https://www.python.org/">
-        <img src="https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python&logoColor=white" alt="Python Version">
-      </a>
-      <a href="https://github.com/chinokikiss/GSV-TTS-Lite/stargazers">
-        <img src="https://img.shields.io/github/stars/chinokikiss/GSV-TTS-Lite?style=for-the-badge&color=yellow&logo=github" alt="GitHub stars">
-      </a>
-      <a href="https://pepy.tech/project/gsv-tts-lite">
-        <img src="https://img.shields.io/pepy/dt/gsv-tts-lite?style=for-the-badge&color=brightgreen" alt="Downloads">
-      </a>
-  </p>
-
   <p>
     <a href="README_EN.md">
       <img src="https://img.shields.io/badge/English-66ccff?style=flat-square&logo=github&logoColor=white" alt="English">
@@ -48,9 +33,11 @@
 
 ## About
 
-**GSV-TTS-Lite** is a high-performance inference engine based on **GPT-SoVITS (V2/V2Pro/V2ProPlus)**. Through deep optimizations such as CUDA Graph, Nested KV Cache, and Continuous Batching, it achieves millisecond-level real-time synthesis (3x~4x faster than the original with half the VRAM).
+This repository is a **standalone multi-speaker development fork of GSV-TTS-Lite**, centered on **MultiSpeakerTTS multi-speaker shared-backbone inference**:
 
-The core of this repository is **MultiSpeakerTTS multi-speaker shared-backbone inference**: **one** GPT+SoVITS backbone serves multiple fine-tuned speakers simultaneously, with each speaker injecting only ~5-15% lightweight per-speaker weights, saving **40%~75%** VRAM/memory — **the more speakers, the more you save**.
+The traditional approach loads a full model per speaker, so VRAM/memory grows linearly with the speaker count. This repo loads only **one shared GPT+SoVITS backbone**, and each speaker injects just ~5-15% lightweight per-speaker weights (~25 GPT keys + 37 SoVITS keys), **dynamically switched by speaker name at zero cost** — in multi-speaker scenarios this saves **40%~75%** VRAM/memory, and **the more speakers, the more you save**.
+
+Full single-speaker inference (`TTS`) is also available: token-level streaming, batched inference, character-level timestamps, zero-shot voice conversion, and speaker verification, plus **WebUI** and **API** servers.
 
 Supported languages: **Chinese, Japanese, English**; supported models: **V2**, **V2Pro**, **V2ProPlus**.
 
