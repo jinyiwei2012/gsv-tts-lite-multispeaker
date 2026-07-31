@@ -10,12 +10,6 @@
 </div>
 
 <div align="center">
-  <h1>GSV-TTS-Lite · MultiSpeaker</h1>
-
-  <p>
-    GPT-SoVITS 多角色共享骨干推理引擎（MultiSpeakerTTS）
-  </p>
-
   <p>
     <a href="README_EN.md">
       <img src="https://img.shields.io/badge/English-66ccff?style=flat-square&logo=github&logoColor=white" alt="English">
@@ -33,71 +27,77 @@
 
 ## 关于项目 (About)
 
-本仓库是 **GSV-TTS-Lite 的多说话人（MultiSpeaker）独立开发仓库**，核心能力是 **MultiSpeakerTTS 多角色共享骨干推理**：
+**一句话：这个项目能让 AI 用"多个不同的声音"朗读文字，而且比传统方案省很多显存/内存。**
 
-传统方案为每个角色加载一套完整模型，显存/内存随角色数量线性增长；本仓库仅加载**一套共享 GPT+SoVITS 骨干**，每个角色只注入约 5-15% 的轻量专属权重（约 25 GPT keys + 37 SoVITS keys），按角色名**动态切换、零开销**——多角色场景显存/内存节省 **40%~75%**，**角色越多节省越大**。
+想象一下：你想做一个播客或游戏配音，里面有 3 个角色。传统做法是每个角色都准备一套完整的 AI 模型——3 个角色就是 3 套模型，非常占资源。
 
-同时保留完整单说话人推理能力（`TTS`）：Token 级流式、批量并行、字级时间戳、零样本音色迁移、声纹识别，并提供 **WebUI** 与 **API** 服务。
+本项目只需要 **1 套"公共模型"（骨干）**，每个角色再配一份**很小的"专属调整包"（约 5-15% 的轻量权重）**。合成时按角色名自动切换，**角色越多，省得越多**（实测省 40%~75%）。
 
-支持语言：**中日英**；支持模型：**V2**、**V2Pro**、**V2ProPlus**。
+- 支持语言：**中文、日文、英文**
+- 支持模型：**V2 / V2Pro / V2ProPlus**（看不懂没关系，用默认的就行）
+- 除了多角色，也保留了完整的单说话人功能（见下方 [使用指南](#-单说话人推理-tts)）
+
+> 不用写代码？可以直接用 [WebUI 图形界面](#-webui-可视化界面)，网页上点点点就能合成。
 
 ## ✨ 功能特性 (Features)
 
-- 🎭 **多角色共享骨干**：一套 GPT+SoVITS 骨干承载 10+ 角色，每角色仅需约 25 GPT keys + 37 SoVITS keys 的专属权重
-- 🔀 **零开销角色切换**：角色权重按需动态注入，切换角色无额外推理成本
-- 🔌 **自动兼容性校验**：角色模型与骨干架构不匹配时自动降级为全量加载，不中断其他角色
-- ⚡ **全模式推理**：单角色 `infer`、Token 级流式 `infer_stream`、同角色 GPU 并行 `infer_batched`
-- 🎵 **音色与风格解耦**：音色（Speaker）与风格（Prompt）独立控制，支持按次调用覆盖风格参考
-- 🖥️ **WebUI / API 全支持**：`<speaker:角色名>` 标签混用合成、6+1 个 MultiSpeaker API 端点
-- ⏱️ **字级时间戳**：逐字返回时间戳，支持字幕同步
-- 🌐 **三语支持**：中日英自动语言检测（`auto` / `ja` / `zh` / `en`）
+- 🎭 **多角色共享骨干**：1 套模型服务 10+ 个角色，每个角色只需一份很小的专属权重
+- 🔀 **切换角色零成本**：角色随时切换，不卡顿、不额外占内存
+- 🔌 **自动兼容检查**：角色模型不匹配时自动降级处理，不会崩，也不影响其他角色
+- ⚡ **三种用法都支持**：单句合成、边说边出（流式）、批量合成（同一角色多句自动并行加速）
+- 🎵 **音色和风格分开控制**：声音像谁（音色）和说话语气（风格）可以分别指定，每次还能临时换风格
+- ⏱️ **字幕时间轴**：每个字的时间都能拿到，方便做字幕
+- 🖥️ **WebUI / API 全支持**：网页界面一键操作，也提供接口给程序调用
+- 🌐 **中日英自动识别**：不用手动告诉它文本是什么语言
 
-## 🎭 MultiSpeakerTTS 共享骨干推理（核心特性）
+## 🎭 MultiSpeakerTTS：多角色共享骨干（本项目的核心）
 
-### 工作原理
+### 它是怎么工作的？（大白话版）
 
-与传统"每角色全量加载一套模型"不同，`MultiSpeakerTTS` 先加载**一套共享的 GPT+SoVITS 骨干**，再将每个角色的微调权重差异（约 25 GPT keys + 37 SoVITS keys）单独保存；推理时按角色名**动态注入**对应权重。
+把它想象成**一家配音公司**：
 
-因此内存/显存占用 ≈ **1 套骨干 + 1 份角色权重**，而非"角色数 × 全量模型"。GPU 环境下权重注入几乎不增加显存开销，收益随角色数量线性增长。
+- **骨干** = 公司的固定配音团队和设备（1 套，大家共用）
+- **角色权重** = 每位配音演员随身带的"声线调整包"（很小）
+- **换角色** = 演员换包，团队和设备原地不动
 
-### 实测基准（共享骨干 vs 全量加载）
+传统方案等于给每位演员都配一套完整的公司（团队+设备），3 个角色就是 3 家公司，又贵又占地方。本项目 1 家公司 + N 个随身包就能干同样的事——这就是省内存/显存的原理。
+
+> 技术细节（给开发者）：共享骨干 = 1 套 GPT + SoVITS 模型；每个角色只注入约 25 个 GPT 权重 + 37 个 SoVITS 权重。合成时按角色名动态注入，同一时刻只有 1 份角色权重生效，所以占用 ≈ 1 套骨干 + 1 份角色权重。
+
+### 实测数据（给想看数字的人，跳过也行）
 
 > [!NOTE]
-> **测试环境**：CPU 参考环境（无 GPU），使用真实微调角色模型（CyreneV3.7 / shouanren / LuoTianyi，v2ProPlus 兼容架构），短文本推理平均值。
+> 测试环境：CPU（无显卡），使用真实微调角色模型（CyreneV3.7 / shouanren / LuoTianyi），短文本推理平均值。
 
-| 指标 | 共享骨干 | 全量加载 | 说明 |
+| 指标 | 共享骨干 | 传统全量加载 | 说明 |
 | :--- | :---: | :---: | :--- |
-| 单角色推理平均延迟 | 0.7~0.9s | 0.8~0.9s | ⚖️ 无性能损失 |
-| 峰值内存 (RAM) | **2.77 GB** | 4.65 GB | 💾 节省 **40%**（CPU 实测） |
-| 3 角色初始化耗时 | 30.0s | 16.2s | 含一次性权重提取，后续换角色零开销 |
-
-> [!IMPORTANT]
-> **架构兼容性验证**（真实模型）：
-> - ✅ CyreneV3.7、shouanren、LuoTianyi（Agent-LuoTianyi 项目角色模型）→ 共享骨干模式
-> - ⚠️ aimisi（v2 架构，`upsample_initial_channel=512` vs base `768`）→ **自动降级**为完整模型加载，不影响其他角色
->
-> 内存节省随共享角色数量增长（2 角色 -17% → 3 角色 -40%）；GPU 环境显存节省远高于 CPU 实测值（权重注入不依赖显存带宽）。
+| 单角色推理平均延迟 | 0.7~0.9s | 0.8~0.9s | ⚖️ 速度没有损失 |
+| 峰值内存 (RAM) | **2.77 GB** | 4.65 GB | 💾 省 **40%** |
+| 3 角色初始化耗时 | 30.0s | 16.2s | 首次一次性准备，之后换角色零开销 |
 
 | 方案 | 1 角色 | 3 角色 | 5 角色 | 10 角色 |
 |------|--------|--------|--------|---------|
-| 全量加载 | ~800MB | ~2.4GB | ~4.0GB | ~8.0GB |
-| **MultiSpeakerTTS** | ~800MB | **~1.2GB** | **~1.4GB** | **~2.0GB** |
-| 显存节省 | — | **51%** | **65%** | **75%** |
+| 传统全量加载 | ~800MB | ~2.4GB | ~4.0GB | ~8.0GB |
+| **本项目（共享骨干）** | ~800MB | **~1.2GB** | **~1.4GB** | **~2.0GB** |
+| 节省 | — | **51%** | **65%** | **75%** |
 
-### 使用方法
+> [!IMPORTANT]
+> **角色模型兼容性**：角色模型最好是和公共骨干同一代（v2ProPlus 架构）。版本不同也没关系——程序会自动检测，不兼容的角色自动降级为传统方式加载，只是少了省内存的好处，不会报错。
+
+### 使用方法（复制粘贴就能跑）
 
 ```python
 from gsv_tts import MultiSpeakerTTS, SpeakerConfig
 
-# 定义多个角色（模型路径同样支持 safetensors 目录格式）
+# 第 1 步：告诉程序有哪些角色（路径换成你自己的模型和音频文件）
 speakers = [
     SpeakerConfig(
-        name="alice",
-        gpt_model_path="models/alice_gpt.ckpt",
-        sovits_model_path="models/alice_sovits.pth",
-        spk_audio_path="audio/alice_ref.wav",
-        prompt_audio_path="audio/alice_prompt.ogg",  # 可选，默认复用 spk_audio_path
-        prompt_audio_text="こんにちは、アリスです。",
+        name="alice",                     # 角色名（随便起）
+        gpt_model_path="models/alice_gpt.ckpt",    # 该角色的 GPT 模型
+        sovits_model_path="models/alice_sovits.pth",  # 该角色的 SoVITS 模型
+        spk_audio_path="audio/alice_ref.wav",      # 该角色的音色参考音频
+        prompt_audio_path="audio/alice_prompt.ogg", # 风格参考音频（可选，默认用音色参考）
+        prompt_audio_text="こんにちは、アリスです。",  # 风格参考音频里说的内容
     ),
     SpeakerConfig(
         name="bob",
@@ -109,115 +109,91 @@ speakers = [
     ),
 ]
 
-# 一次性加载所有角色（共享骨干 + 角色专属权重）
+# 第 2 步：一次性加载所有角色
 tts = MultiSpeakerTTS(speakers=speakers, use_bert=True)
 
-# 单角色推理——按角色名自动路由，支持语言参数与按次调用的 prompt 覆盖
-audio = tts.infer(
-    "alice",
-    "今日も頑張りましょう！",
-    text_language="ja",       # "auto" / "ja" / "zh" / "en"
-    prompt_language="ja",     # "auto" / "ja" / "zh" / "en"
-    # prompt_audio_path="other_style.ogg",   # 可选：临时覆盖风格参考音频
-    # prompt_audio_text="別のスタイルのテキスト。",  # 覆盖时需同步提供对应文本
-)
+# 第 3 步：按角色名合成语音
+audio = tts.infer("alice", "今日も頑張りましょう！", text_language="ja")
 audio.play()
-
-# 流式推理——Token 级流式输出，低延迟实时反馈
-for chunk in tts.infer_stream(
-    "alice",
-    "へぇー、ここまでしてくれるんですね。",
-    text_language="ja",
-    stream_chunk=25,
-    overlap_len=5,
-    return_subtitles=True,
-):
-    chunk.play()
-
 tts.audio_queue.wait()
 
-# 批量推理——相同角色自动 GPU 并行，支持逐句语言指定
+# 想在同一段话里混多个角色？用 <speaker:角色名> 标签
 audios = tts.infer_batched(
     [
         ("alice", "こんにちは"),
-        ("alice", "お元気ですか"),
         ("bob",   "よろしくお願いします"),
     ],
-    text_languages=["ja", "ja", "ja"],  # 或直接传 "auto"
+    text_languages=["ja", "ja"],
 )
 
-# 运行时管理：动态增删角色，无需重启
+# 运行时还能动态加角色 / 删角色，不用重启
 tts.add_speaker(SpeakerConfig(name="charlie", ...))
 tts.remove_speaker("bob")
-print(tts.speaker_names)  # ["alice", "charlie"]
 ```
-
-> [!TIP]
-> **自动兼容性校验**：加载时自动比对角色模型与基模型的架构参数（`vocab_size`、`n_layer`、`gin_channels`、`upsample_initial_channel` 等）。不兼容的角色会**自动降级**为完整模型加载，无需用户干预。
 
 ## 🚀 快速开始 (Quick Start)
 
-### 环境准备
+### 需要准备什么？
 
-- Python **>= 3.10**，建议使用虚拟环境
-- 支持 **CUDA**、**MPS (Apple Silicon)**、**CPU** 三种推理后端
+- ✅ 一台电脑（CPU 也能跑，有 NVIDIA 显卡更快）
+- ✅ Python **3.10 或更高**（安装教程：网上搜"Python 安装"）
+- ✅ 能联网（首次运行要下载模型，约 5~10 GB）
+- ✅ 硬盘空间：模型默认存在 `C:\Users\你的用户名\.cache\gsv`（可用 `models_dir` 参数改位置）
+
+### 安装（3 条命令）
 
 ```bash
-# NVIDIA GPU (CUDA 12.8)
+# 1. 安装 PyTorch（深度学习框架）
+#    有 NVIDIA 显卡：
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+#    没显卡（Mac / 普通电脑）：
+#    pip install torch torchvision torchaudio
 
-# Apple Silicon (MPS) 或 Linux/Windows (仅 CPU)
-pip install torch torchvision torchaudio
-```
-
-### 安装 GSV-TTS-Lite
-
-> [!WARNING]
-> **多说话人（MultiSpeakerTTS）功能尚未发布到 PyPI**，PyPI 的 `gsv-tts-lite` 包仅有单说话人推理能力。如需使用多角色共享骨干，必须从本仓库安装：
-
-```bash
+# 2. 克隆本仓库并安装
 git clone https://github.com/jinyiwei2012/gsv-tts-lite-multispeaker.git
 cd gsv-tts-lite-multispeaker
 pip install -e .
 ```
 
-### 首次运行：模型自动下载
+> [!WARNING]
+> **注意**：多说话人功能还没有发布到 PyPI（`pip install gsv-tts-lite` 只能装到单说话人版），所以**必须**用上面的方式从本仓库安装。
 
-> [!NOTE]
-> 首次构造 `TTS` / `MultiSpeakerTTS` 时，程序会自动下载所需预训练模型（数 GB）到本地缓存目录 **`~/.cache/gsv`**（可通过 `TTS(models_dir=...)` 自定义）：
-> - GPT 模型：`s1v3.ckpt`；SoVITS 模型：`s2Gv2ProPlus.pth`
-> - 预训练组件：CNHubert、G2P、声纹模型、CNRoBERTa（BERT）
->
-> 下载源按延迟自动选择：**ModelScope → hf-mirror → HuggingFace**。国内网络环境一般会自动选中 ModelScope；也可用环境变量强制指定：
->
-> ```bash
-> # 可选：强制指定下载镜像 modelscope / huggingface / hf-mirror
-> set GSV_MIRROR=modelscope
-> ```
+### 首次运行：自动下载模型（只需要一次）
 
-### 单说话人基础推理
+第一次运行程序时，它会**自动下载**配音所需的所有"材料"（预训练模型）到 `~/.cache/gsv`：
 
-> [!NOTE]
-> 仅需单角色的场景，可直接使用 `TTS`（本仓库同样提供完整单说话人推理能力，见[单说话人推理](#-单说话人推理-tts)一节）。
+| 文件 | 是干什么的 |
+| :--- | :--- |
+| `s1v3.ckpt` | GPT 模型：决定"说什么、怎么说" |
+| `s2Gv2ProPlus.pth` | SoVITS 模型：把语义变成声音 |
+| `chinese-hubert-base` | 语音特征提取（处理参考音频用） |
+| `g2p` | 文字转读音 |
+| `sv` | 声纹识别（判断声音像谁） |
+| `chinese-roberta-wwm-ext-large` | 中文理解增强（提升中文效果） |
+
+下载需要几分钟到几十分钟，取决于网速。国内一般自动选 ModelScope 镜像；如果太慢或失败，可以强制指定镜像：
+
+```bash
+# Windows (PowerShell)
+$env:GSV_MIRROR = "modelscope"
+# Linux/macOS
+export GSV_MIRROR=modelscope
+```
+
+### 单说话人基础推理（想先听个响？）
 
 ```python
 from gsv_tts import TTS
 
 tts = TTS(use_bert=True)
-# tts = TTS(use_flash_attn=True) 如果安装了Flash Attention，建议这样设置
 
-# 将 GPT / SoVITS 模型权重从指定路径加载到内存中，这里加载默认模型。
-tts.load_gpt_model()
-tts.load_sovits_model()
-
-# infer 是最简单、最原始的推理方式，只适用于短文本推理，一般建议用 infer_batched 替代 infer 推理。
+# 用仓库自带的示例音频就能直接合成
 audio = tts.infer(
-    spk_audio_path="examples\laffey.mp3", # 音色参考音频
-    prompt_audio_path="examples\AnAn.ogg", # 风格参考音频
-    prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。", # 风格参考音频对应的文本
-    text="へぇー、ここまでしてくれるんですね。", # 目标生成文本
-    text_language="auto", # 目标文本语言："auto" / "ja" / "zh" / "en"，默认自动检测
-    prompt_language="auto", # 参考音频文本语言："auto" / "ja" / "zh" / "en"，默认自动检测
+    spk_audio_path="examples/laffey.mp3",   # 音色参考：用谁的声音
+    prompt_audio_path="examples/AnAn.ogg",  # 风格参考：用什么语气
+    prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",  # 风格参考里说的话
+    text="你好，世界！",                      # 要合成的文字
+    text_language="zh",                      # 文本语言：auto 自动识别
 )
 
 audio.play()
@@ -226,101 +202,51 @@ tts.audio_queue.wait()
 
 ## 📖 单说话人推理 (TTS)
 
-> [!NOTE]
-> 以下为 `TTS` 单说话人引擎的进阶用法。MultiSpeakerTTS 的 `infer` / `infer_stream` / `infer_batched` 均具备同等能力（按角色名路由）。
+> 下面的进阶用法属于 `TTS` 单说话人引擎。多角色引擎（MultiSpeakerTTS）同样具备这些能力。
 
 <details>
-<summary><strong>1. 流式推理 / 字幕同步</strong></summary>
-
-`infer_stream` 实现了 Token 级别的流式输出，显著降低首字延迟。`infer`、`infer_stream`、`infer_batched`、`infer_vc` 均支持字级时间戳返回。
+<summary><strong>1. 流式合成（边说边出，适合实时对话）</strong></summary>
 
 ```python
-import time
-import queue
-import threading
 from gsv_tts import TTS
 
-class SubtitlesQueue:
-    def __init__(self):
-        self.q = queue.Queue()
-        self.t = None
+tts = TTS(use_bert=True, sovits_cache=[50, 55])
 
-    def process(self):
-        last_i = 0
-        last_t = time.time()
-
-        while True:
-            subtitles, text = self.q.get()
-
-            if subtitles is None:
-                break
-
-            for subtitle in subtitles:
-                if subtitle["start_s"] > time.time() - last_t:
-                    time.sleep(subtitle["start_s"] - (time.time() - last_t))
-
-                if subtitle["end_s"] and subtitle["end_s"] > time.time() - last_t:
-                    if subtitle["orig_idx_end"] > last_i:
-                        print(text[last_i:subtitle["orig_idx_end"]], end="", flush=True)
-                        last_i = subtitle["orig_idx_end"]
-                        time.sleep(subtitle["end_s"] - (time.time() - last_t))
-
-        self.t = None
-
-    def add(self, subtitles, text):
-        self.q.put((subtitles, text))
-        if self.t is None:
-            self.t = threading.Thread(target=self.process, daemon=True)
-            self.t.start()
-
-tts = TTS(use_bert=True, sovits_cache=[50, 55]) # 50 = stream_chunk * 2 = 25 * 2, 55 = stream_chunk * 2 + overlap_len = 25 * 2 + 5
-
-subtitlesqueue = SubtitlesQueue()
-
-generator = tts.infer_stream(
-    spk_audio_path="examples\laffey.mp3",
-    prompt_audio_path="examples\AnAn.ogg",
+for chunk in tts.infer_stream(
+    spk_audio_path="examples/laffey.mp3",
+    prompt_audio_path="examples/AnAn.ogg",
     prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
     text="へぇー、ここまでしてくれるんですね。",
-    text_language="auto", # 目标文本语言："auto" / "ja" / "zh" / "en"
-    prompt_language="auto", # 参考音频文本语言："auto" / "ja" / "zh" / "en"
-    stream_chunk = 25,
-    overlap_len = 5,
-    return_subtitles=True,
+    text_language="auto",
+    prompt_language="auto",
+    stream_chunk=25,
+    overlap_len=5,
     debug=False,
-)
-
-for audio in generator:
-    audio.play()
-    subtitlesqueue.add(audio.subtitles, audio.orig_text)
+):
+    chunk.play()
 
 tts.audio_queue.wait()
-subtitlesqueue.add(None, None)
 ```
+
+> 想拿逐字时间戳做字幕？加 `return_subtitles=True`，每个字的开始/结束时间都在结果里。
 
 </details>
 
 <details>
-<summary><strong>2. 批量推理</strong></summary>
-
-`infer_batched` 专为长文本及多句合成场景优化，支持在同一批次中为不同句子指定不同的参考音频。
+<summary><strong>2. 批量合成（长文本/多句话更高效）</strong></summary>
 
 ```python
 from gsv_tts import TTS
 
-# gpt_cache: GPT 模型 CUDA graph 的静态缓存配置，参数为元组列表 [(batch_size, sequence_length), ...]。
-# 注意：设置的最大 batch_size 决定了该模式下的最大并发吞吐量；同一批次的最大 sequence_length 决定单次生成的最大长度限制。
 tts = TTS(use_bert=True)
 
 audios = tts.infer_batched(
-    spk_audio_paths="examples\laffey.mp3",
-    prompt_audio_paths="examples\AnAn.ogg",
+    spk_audio_paths="examples/laffey.mp3",
+    prompt_audio_paths="examples/AnAn.ogg",
     prompt_audio_texts="ちが……ちがう。レイア、貴様は間違っている。",
-    texts=["へぇー、ここまでしてくれるんですね。", "The old map crinkled in Leo’s trembling hands."],
-    text_languages="auto", # 目标文本语言，支持 str 或逐句 list[str]："auto" / "ja" / "zh" / "en"
-    prompt_languages="auto", # 参考音频文本语言，支持 str 或逐句 list[str]："auto" / "ja" / "zh" / "en"
-    bert_batch_size=20,
-    sovits_batch_size=10,
+    texts=["你好", "The old map crinkled in Leo's trembling hands."],
+    text_languages="auto",
+    prompt_languages="auto",
 )
 
 for i, audio in enumerate(audios):
@@ -330,55 +256,43 @@ for i, audio in enumerate(audios):
 </details>
 
 <details>
-<summary><strong>3. 音色迁移 / 声纹识别</strong></summary>
+<summary><strong>3. 音色迁移（变声）与声纹识别</strong></summary>
 
 ```python
 from gsv_tts import TTS
 
-# 零样本音色迁移（变声）
+# 音色迁移：把一段音频的内容，用另一个人的声音说出来
 tts = TTS(use_bert=True, always_load_cnhubert=True)
 audio = tts.infer_vc(
-    spk_audio_path="examples\laffey.mp3",
-    prompt_audio_path="examples\AnAn.ogg",
+    spk_audio_path="examples/laffey.mp3",    # 目标音色
+    prompt_audio_path="examples/AnAn.ogg",   # 源音频内容
     prompt_audio_text="ちが……ちがう。レイア、貴様は間違っている。",
 )
 audio.play()
 
-# 声纹识别：对比两段音频是否为同一说话人
+# 声纹识别：判断两段音频是不是同一个人
 tts2 = TTS(use_bert=True, always_load_sv=True)
-similarity = tts2.verify_speaker("examples\laffey.mp3", "examples\AnAn.ogg")
+similarity = tts2.verify_speaker("examples/laffey.mp3", "examples/AnAn.ogg")
 print("声纹相似度：", similarity)
 ```
 
 </details>
 
 <details>
-<summary><strong>4. 其他函数接口</strong></summary>
+<summary><strong>4. 更多函数接口（开发者）</strong></summary>
 
-#### 模型管理
-
-- `init_language_module(languages)` — 预加载必要的语言处理模块
-- `load_gpt_model(model_paths)` / `load_sovits_model(model_paths)` — 将模型权重从指定路径加载到内存
-- `unload_gpt_model(model_paths)` / `unload_sovits_model(model_paths)` — 从内存中卸载模型释放资源
-- `get_gpt_list()` / `get_sovits_list()` — 获取当前已加载的模型列表
-- `to_safetensors(checkpoint_path)` — 将 PyTorch 权重文件（.pth / .ckpt）转换为 safetensors 目录格式
-
-#### 音频缓存管理
-
-- `cache_spk_audio(spk_audio_paths)` — 预处理并缓存音色参考音频
-- `cache_prompt_audio(prompt_audio_paths, prompt_audio_texts, prompt_audio_languages)` — 预处理并缓存风格参考音频
-- `del_spk_audio(spk_audio_paths)` / `del_prompt_audio(prompt_audio_paths)` — 从缓存中移除音频数据
-- `get_spk_audio_list()` / `get_prompt_audio_list()` — 获取缓存中的音频数据列表
-
-#### 异步调用
-
-- `infer_async(...)` — `infer` 方法的异步版本
-- `infer_stream_async(...)` — `infer_stream` 方法的异步版本
-- `infer_batched_async(...)` — `infer_batched` 方法的异步版本
+- `load_gpt_model(path)` / `load_sovits_model(path)` — 加载模型权重到内存
+- `unload_gpt_model(path)` / `unload_sovits_model(path)` — 卸载模型释放资源
+- `get_gpt_list()` / `get_sovits_list()` — 查看已加载的模型
+- `to_safetensors(path)` — 把 .pth/.ckpt 模型转换成更安全的 safetensors 格式
+- `cache_spk_audio(path)` / `cache_prompt_audio(path, text)` — 预缓存音频，减少首次延迟
+- `infer_async(...)` / `infer_stream_async(...)` / `infer_batched_async(...)` — 异步版本
 
 </details>
 
-## 🌐 WebUI 可视化界面
+## 🌐 WebUI 可视化界面（不用写代码）
+
+不想写代码？网页版适合你：浏览器打开，上传音频、输入文字、点按钮，就能合成（支持单模型和多角色两种模式，多角色还支持 `<speaker:角色名>文本</speaker:角色名>` 标签混用）。
 
 ```bash
 cd WebUI
@@ -386,10 +300,9 @@ pip install -r requirements.txt   # 自动以 -e .. 安装本仓库 gsv_tts（Mu
 python web.py                     # 可选参数: --port 9881 / --use_asr / --models_dir ...
 ```
 
-> [!TIP]
-> WebUI 支持**单模型 / 多角色**两种推理模式，一键切换。多角色模式下支持 `<speaker:角色名>文本</speaker:角色名>` 标签混用，自动 GPU 批量并行。
+启动后浏览器会自动打开 `http://127.0.0.1:9881`。
 
-## 🔌 API 服务接口
+## 🔌 API 服务接口（给开发者）
 
 ```bash
 cd API
@@ -397,12 +310,12 @@ pip install -r requirements.txt
 ```
 
 - 核心文档：[API 详细指南](API/README.md)、[Personal API 文档](API/PERSONAL_API.md)
-- 服务入口：`API/personal_api.py`（MultiSpeaker 端点）、`API/realtime_api.py`（实时流式）
+- 服务入口：`API/personal_api.py`（含 MultiSpeaker 端点）、`API/realtime_api.py`（实时流式）
 
-> [!TIP]
-> FastAPI 服务包含 **6 个 MultiSpeaker 端点**（`/multi-speaker/init`、`/multi-speaker/add`、`/multi-speaker/remove`、`/multi-speaker/list`、`/multi-speaker/infer`、`/multi-speaker/batch`）及 `/multi-speaker/stream` SSE 流式端点，支持多角色管理与批量推理。
+> 提供 6 个多角色管理端点（`/multi-speaker/init`、`/add`、`/remove`、`/list`、`/infer`、`/batch`）+ `/multi-speaker/stream` 流式端点，方便程序集成。
 
-## 📁 项目结构 (Project Structure)
+<details>
+<summary><strong>📁 项目结构（给开发者）</strong></summary>
 
 ```
 gsv_tts/                  # 核心 Python 包（pip install -e . 安装）
@@ -427,82 +340,97 @@ API/                      # FastAPI 服务（独立 requirements.txt）
 examples/                 # 示例参考音频（laffey.mp3 / AnAn.ogg）
 ```
 
-## 🛠️ 开发与调试指南 (Development)
+</details>
 
-### 测试
+<details>
+<summary><strong>🛠️ 开发与调试（给开发者）</strong></summary>
+
+**测试**（无需 pytest，直接运行）：
 
 ```bash
 # 自洽性测试：验证共享骨干输出与全量模型一致（MCD 指标）
 python tests/test_sovits_sharing.py
 
-# 使用真实微调模型评估（可选参数）
-python tests/test_sovits_sharing.py --speaker-gpt path/to/speaker_gpt.ckpt --speaker-sovits path/to/speaker_sovits.pth
+# 使用真实微调模型评估
+python tests/test_sovits_sharing.py --speaker-gpt path/to/gpt.ckpt --speaker-sovits path/to/sovits.pth
 ```
 
-> [!NOTE]
-> MCD 计算需要 `librosa`，未安装时自动跳过该指标并警告。测试无需 pytest，直接以脚本方式运行。
+> MCD 计算需要 `librosa`，未安装时自动跳过并警告。
 
-### 基准测试
+**基准测试**（自动发现仓库内模型，或手动指定）：
 
 ```bash
-python benchmarks/bench_multi_speaker.py
+python benchmarks/bench_multi_speaker.py                          # 自动扫描仓库内 .ckpt/.pth 配对
+python benchmarks/bench_multi_speaker.py --models-dir models      # 指定扫描目录
+python benchmarks/bench_multi_speaker.py --gpt a.ckpt --sovits b.pth   # 手动指定（可重复）
 ```
 
-> [!TIP]
-> 脚本默认自动扫描仓库内（或 `--models-dir` 指定目录）的 `.ckpt` / `.pth` 模型文件，按文件名前缀自动配对；也可用 `--gpt` / `--sovits` 显式指定测试模型对（可重复指定，支持 safetensors 目录）。仓库内没有模型时会打印提示并退出。
+**模型格式与兼容性**：
 
-### 模型格式与兼容性
+- 支持传统 `.ckpt` / `.pth` 检查点（加载时会提示安全警告，属正常现象），也支持更安全的 **safetensors 目录格式**（`hps.json` + `model.safetensors`），可用 `tts.to_safetensors(path)` 转换。
+- SoVITS 版本自动识别：看文件头（`01`=v2、`05`=v2Pro、`06`=v2ProPlus），识别不了就按 v2 处理并警告。
+- 设备差异：Mac/CPU 环境自动用 float32 并禁用部分缓存；CPU 下中文增强用 INT8 量化模型，显卡下用原版模型。
 
-- **权重格式**：支持传统 `.ckpt` / `.pth` 检查点（通过 pickle 反序列化加载，启动时会输出安全警告），也支持更安全的 **safetensors 目录格式**（`hps.json` + `model.safetensors`）。可用 `tts.to_safetensors(path)` 转换。
-- **SoVITS 版本嗅探**：加载时通过文件头字节（`01`=v2、`05`=v2Pro、`06`=v2ProPlus）或预训练文件 MD5 自动识别版本；无法识别时默认按 v2 处理并输出警告。
-- **设备差异**：MPS/CPU 环境强制使用 `float32` 并清空 `sovits_cache`；CPU 下 BERT 使用 INT8 量化 ONNX 模型，GPU 下使用 PyTorch 原版模型。
+**常见坑位**：
 
-### 镜像下载
+- 不要删除 `Loader.py` 顶部的 `sys.modules['utils']` monkey-patch（旧版模型加载依赖它）。
+- `gpt_cache` / `sovits_cache` 参数别乱改，配置不当会触发 CUDA graph 报错。
+- 推理由 `_infer_lock` 串行化并自动清理显存；模型是懒加载（第一次推理才加载）。
 
-模型下载镜像按延迟自动选择（ModelScope → hf-mirror → HuggingFace）。开发调试下载问题时可用环境变量强制指定：
-
-```bash
-# Windows (PowerShell)
-$env:GSV_MIRROR = "modelscope"   # modelscope / huggingface / hf-mirror
-# Linux/macOS
-export GSV_MIRROR=modelscope
-```
-
-### 常见坑位
-
-- 修改 `Loader.py` 顶部的 `sys.modules['utils']` monkey-patch 会导致旧版 GPT-SoVITS 检查点反序列化失败——**不要移除**。
-- `gpt_cache` / `sovits_cache` 参数控制 CUDA graph 静态缓存尺寸，配置不当会触发 CUDA graph 报错——不要随意改动默认值。
-- 推理由 `_infer_lock` 串行化并自动执行显存清理（`_empty_cache`），模型为懒加载（首次推理时才加载），调试显存占用时注意区分。
+</details>
 
 ## ❓ 常见问题 (FAQ)
 
-**Q1：多说话人功能无法从 PyPI 安装？**
-本仓库的 MultiSpeakerTTS 功能尚未发布至 PyPI。请从本仓库 `pip install -e .` 安装。
+**Q1：`pip install gsv-tts-lite` 装完没有多角色功能？**
+多说话人功能还没发布到 PyPI，必须从本仓库安装：`git clone` + `pip install -e .`（见[快速开始](#-快速开始-quick-start)）。
 
-**Q2：某角色显存/内存占用异常高，没有走共享骨干？**
-该角色模型架构与基模型不兼容（如 v2 的 `upsample_initial_channel=512` vs 基模型 `768`），已自动降级为全量加载。加载日志会提示；建议统一使用与基模型同架构（v2ProPlus）的微调模型。
+**Q2：第一次运行下载模型很慢 / 失败？**
+用 `GSV_MIRROR` 环境变量强制换镜像（国内建议 `modelscope`），或者手动把模型文件放到 `~/.cache/gsv`（文件清单见[首次运行](#首次运行自动下载模型只需要一次)）。
 
-**Q3：修改了参考音频内容，但推理结果没变？**
-说话人/风格参考音频缓存以路径为键——同一路径替换文件内容后会命中旧缓存。更换内容后请删除对应缓存（`del_spk_audio` / `del_prompt_audio`）或更换文件路径。
+**Q3：某个角色特别占内存，好像没用上"共享骨干"？**
+这个角色的模型和公共骨干版本不兼容（比如 v2 和 v2ProPlus），程序自动降级为传统方式加载了。日志里会提示。想省内存就把所有角色模型统一成 v2ProPlus 架构。
 
-**Q4：首次运行下载模型很慢或失败？**
-用 `GSV_MIRROR` 环境变量强制指定镜像（国内建议 `modelscope`），或将模型文件手动放置到缓存目录（默认 `~/.cache/gsv`，结构见「首次运行」小节）。
+**Q4：换了参考音频内容，但合成结果没变化？**
+音频缓存是按路径记的：同一个路径换了新内容，程序还以为是旧文件。换内容后删除缓存（`del_spk_audio` / `del_prompt_audio`）或换个文件名。
 
 **Q5：报 CUDA graph 相关错误？**
-多为 `gpt_cache` / `sovits_cache` 参数配置不当，恢复默认值即可；MPS/CPU 环境不需要这两个参数。
+多为 `gpt_cache` / `sovits_cache` 参数被改过，恢复默认值即可；Mac/CPU 环境不需要这两个参数。
 
-**Q6：加载模型时出现 `weights_only=False` 安全警告？**
-这是为兼容旧版 GPT-SoVITS 检查点的刻意行为。仅加载可信来源的模型，或将权重转换为 safetensors 目录格式（`tts.to_safetensors`）以消除该风险。
+**Q6：加载模型时有 `weights_only=False` 安全警告？**
+这是为了兼容旧版模型文件的刻意行为。只加载你信任的模型文件，或转成 safetensors 格式（`tts.to_safetensors`）消除风险。
 
-## ⚡ Flash Attention
+<details>
+<summary><strong>📖 术语速查（看不懂的名词都在这）</strong></summary>
 
-追求**更低延迟**和**更高吞吐量**时，强烈建议开启 Flash Attention：
+| 名词 | 大白话解释 |
+| :--- | :--- |
+| **GPT 模型** | 负责"想说什么、怎么说"的模型（文字 → 语义） |
+| **SoVITS 模型** | 负责"把语义变成声音"的模型（语义 → 音频） |
+| **骨干（Backbone）** | 所有角色共用的那 1 套模型 |
+| **角色权重（Weights）** | 模型里"学到的东西"，每个角色的专属小调整包 |
+| **音色参考音频** | 告诉程序"用谁的声音"（几秒的人声即可） |
+| **风格参考音频** | 告诉程序"用什么语气、情绪"（可选） |
+| **显存（VRAM）** | 显卡上的内存，越大能跑的模型越多 |
+| **safetensors** | 一种更安全的模型文件格式（替代 .pth/.ckpt） |
+| **v2 / v2Pro / v2ProPlus** | SoVITS 模型的三个版本，越新效果越好 |
+| **微调（Fine-tune）** | 用某个人的声音数据训练出的专属角色模型 |
+| **音素（Phoneme）** | 语言的最小发音单位，比如拼音的声母韵母 |
+| **BERT** | 提升中文理解效果的语言模型 |
+| **RTF** | 实时率：合成 1 秒音频需要的时间，小于 1 表示比实时快 |
 
-- 🐧 **Linux / 源码构建**：[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)
-- 🪟 **Windows 用户**：[lldacing/flash-attention-windows-wheel](https://huggingface.co/lldacing/flash-attention-windows-wheel/tree/main)（预编译 Wheel）
+</details>
 
-> [!TIP]
-> 安装完成后，在 TTS 配置中设置 `use_flash_attn=True` 即可享受加速效果！🚀
+<details>
+<summary><strong>⚡ Flash Attention（进阶加速，可选）</strong></summary>
+
+追求更低延迟、更高吞吐量时可以启用 Flash Attention 加速：
+
+- 🐧 **Linux**：[Dao-AILab/flash-attention](https://github.com/Dao-AILab/flash-attention)（源码编译）
+- 🪟 **Windows**：[lldacing/flash-attention-windows-wheel](https://huggingface.co/lldacing/flash-attention-windows-wheel/tree/main)（预编译包）
+
+安装后在代码里设置 `use_flash_attn=True` 即可。
+
+</details>
 
 ## 致谢 (Credits)
 
