@@ -545,6 +545,29 @@ def _tts_multi_infer(speaker, text, top_k, top_p, temperature, rep_penalty,
     return (samplerate, audio_data), msg, history_entry
 
 
+def _parse_speaker_stream_segments(text, default_speaker):
+    """Split text into [(speaker, segment), ...] honoring <speaker:name> tags.
+
+    Plain text outside tags uses default_speaker. Empty segments are dropped.
+    """
+    segments = []
+    pattern = re.compile(r'<speaker:([^>]+)>(.*?)</speaker>', re.DOTALL)
+    pos = 0
+    for m in pattern.finditer(text):
+        if m.start() > pos:
+            plain = text[pos:m.start()].strip()
+            if plain:
+                segments.append((default_speaker, plain))
+        seg_text = m.group(2).strip()
+        if seg_text:
+            segments.append((m.group(1).strip(), seg_text))
+        pos = m.end()
+    tail = text[pos:].strip()
+    if tail:
+        segments.append((default_speaker, tail))
+    return segments
+
+
 def tts_stream_request(
     multi_spk_files, spk_weights,
     prompt_audio, prompt_text,
@@ -558,26 +581,57 @@ def tts_stream_request(
 
     Single-model mode uses TTS.infer_stream; multi-speaker mode uses the
     MultiSpeakerTTS.infer_stream (shared backbone, token-level streaming).
+    Multi-speaker mode also supports <speaker:name> tags — each tagged
+    segment is streamed sequentially with the matching speaker.
     Yields (audio, status) progressively so Gradio renders chunks in real time.
     """
     def gen():
         try:
+            start_time = time.time()
+            chunks = []
+
             if mode == "多角色" and multi_tts is not None:
                 if "<speaker:" in text:
-                    yield None, "⚠️ 混合角色标签 (<speaker:>) 暂不支持流式合成，请使用普通合成", None
-                    return
-                stream_gen = multi_tts.infer_stream(
-                    speaker=multi_cur_speaker,
-                    text=text,
-                    text_language=text_language,
-                    prompt_language=prompt_language,
-                    top_k=top_k, top_p=top_p,
-                    temperature=temperature,
-                    repetition_penalty=rep_penalty,
-                    noise_scale=noise_scale,
-                    speed=speed,
-                    debug=False,
-                )
+                    # 混合角色：按标签逐段流式，每段用对应角色
+                    segments = _parse_speaker_stream_segments(text, multi_cur_speaker)
+                    if not segments:
+                        yield None, "⚠️ 未能解析出有效文本", None
+                        return
+                    for spk, seg in segments:
+                        seg_gen = multi_tts.infer_stream(
+                            speaker=spk,
+                            text=seg,
+                            text_language=text_language,
+                            prompt_language=prompt_language,
+                            top_k=top_k, top_p=top_p,
+                            temperature=temperature,
+                            repetition_penalty=rep_penalty,
+                            noise_scale=noise_scale,
+                            speed=speed,
+                            debug=False,
+                        )
+                        for chunk in seg_gen:
+                            chunks.append(chunk)
+                            total_s = sum(c.audio_len_s for c in chunks)
+                            yield (chunk.samplerate, chunk.audio_data), \
+                                f"⚡ 多角色流式生成中 [{spk}]... 已输出 {len(chunks)} 段 (累计 {total_s:.2f}s)", None
+                else:
+                    stream_gen = multi_tts.infer_stream(
+                        speaker=multi_cur_speaker,
+                        text=text,
+                        text_language=text_language,
+                        prompt_language=prompt_language,
+                        top_k=top_k, top_p=top_p,
+                        temperature=temperature,
+                        repetition_penalty=rep_penalty,
+                        noise_scale=noise_scale,
+                        speed=speed,
+                        debug=False,
+                    )
+                    for i, chunk in enumerate(stream_gen):
+                        chunks.append(chunk)
+                        total_s = sum(c.audio_len_s for c in chunks)
+                        yield (chunk.samplerate, chunk.audio_data), f"⚡ 流式生成中... 已输出 {i + 1} 段 (累计 {total_s:.2f}s)", None
             else:
                 spk_audio = parse_speaker_weights(multi_spk_files, spk_weights)
                 stream_gen = tts.infer_stream(
@@ -594,13 +648,10 @@ def tts_stream_request(
                     speed=speed,
                     debug=False,
                 )
-
-            start_time = time.time()
-            chunks = []
-            for i, chunk in enumerate(stream_gen):
-                chunks.append(chunk)
-                total_s = sum(c.audio_len_s for c in chunks)
-                yield (chunk.samplerate, chunk.audio_data), f"⚡ 流式生成中... 已输出 {i + 1} 段 (累计 {total_s:.2f}s)", None
+                for i, chunk in enumerate(stream_gen):
+                    chunks.append(chunk)
+                    total_s = sum(c.audio_len_s for c in chunks)
+                    yield (chunk.samplerate, chunk.audio_data), f"⚡ 流式生成中... 已输出 {i + 1} 段 (累计 {total_s:.2f}s)", None
 
             if not chunks:
                 yield None, "⚠️ 未生成任何音频", None
