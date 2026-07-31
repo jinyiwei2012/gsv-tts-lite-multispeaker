@@ -364,6 +364,86 @@ def multi_apply_scan(name):
     return gr.update(value=str(gpt)), gr.update(value=str(sovits)), name
 
 
+# ── Speaker group presets (save/restore the whole multi-speaker setup) ──
+GROUP_PRESETS_DIR = webui_dir / "group_presets"
+
+
+def _group_preset_path(name):
+    return GROUP_PRESETS_DIR / f"{name}.json"
+
+
+def get_group_preset_names():
+    if not GROUP_PRESETS_DIR.exists():
+        return []
+    return sorted(p.stem for p in GROUP_PRESETS_DIR.glob("*.json"))
+
+
+def multi_save_group(name):
+    """Save the current speaker list to a JSON group preset."""
+    if not name or not str(name).strip():
+        return gr.update(choices=get_group_preset_names()), "❌ 请输入角色组名称"
+    if not _speaker_data:
+        return gr.update(choices=get_group_preset_names()), "❌ 当前没有已加载的角色"
+    GROUP_PRESETS_DIR.mkdir(exist_ok=True)
+    payload = [
+        {k: s[k] for k in ("name", "gpt_path", "sovits_path", "spk_audio", "prompt_audio", "prompt_text", "mode")}
+        for s in _speaker_data
+    ]
+    with open(_group_preset_path(str(name).strip()), "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2, ensure_ascii=False)
+    return gr.update(choices=get_group_preset_names(), value=str(name).strip()), \
+        f"✅ 角色组 '{name}' 已保存（{len(payload)} 个角色）"
+
+
+def multi_load_group(name):
+    """Restore a speaker group preset: re-add every speaker."""
+    global _speaker_data
+    if not name:
+        return _render_speaker_table(), gr.update(choices=get_group_preset_names()), \
+            gr.update(choices=[]), "❌ 请选择要加载的角色组"
+    path = _group_preset_path(name)
+    if not path.exists():
+        return _render_speaker_table(), gr.update(choices=get_group_preset_names()), \
+            gr.update(choices=[]), f"❌ 角色组 '{name}' 不存在"
+    with open(path, encoding="utf-8") as f:
+        payload = json.load(f)
+
+    # 先清空现有角色
+    for s in list(_speaker_data):
+        try:
+            multi_tts.remove_speaker(s["name"])
+        except Exception:
+            pass
+    _speaker_data = []
+
+    errors = []
+    for item in payload:
+        try:
+            spk = SpeakerConfig(
+                name=item["name"],
+                gpt_model_path=item["gpt_path"],
+                sovits_model_path=item["sovits_path"],
+                spk_audio_path=item["spk_audio"],
+                prompt_audio_path=item.get("prompt_audio") or item["spk_audio"],
+                prompt_audio_text=item.get("prompt_text") or "",
+            )
+            if multi_tts is None:
+                multi_tts = MultiSpeakerTTS(speakers=[spk], use_bert=USE_BERT)
+            else:
+                multi_tts.add_speaker(spk)
+            w = multi_tts._speakers[item["name"]]
+            mode = "🔄 完整模型" if w.is_full_model else "✅ 共享骨干"
+            _speaker_data.append({**item, "mode": mode})
+        except Exception as e:
+            errors.append(f"{item['name']}: {e}")
+
+    msg = f"✅ 角色组 '{name}' 已加载（{len(_speaker_data)} 个角色）"
+    if errors:
+        msg += "；失败: " + "; ".join(errors)
+    return _render_speaker_table(), gr.update(choices=get_group_preset_names()), \
+        _get_speaker_choices(), msg
+
+
 def vc_request(
     multi_spk_files, spk_weights,
     prompt_audio, prompt_text,
@@ -747,6 +827,13 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                         multi_scan_drop = gr.Dropdown(label="发现结果（选择后填入表单）", choices=[], scale=2)
                         multi_scan_apply = gr.Button("📥 填入表单", size="sm", scale=1)
 
+                    # ── Speaker group presets ──
+                    with gr.Row():
+                        group_preset_drop = gr.Dropdown(label="角色组预设", choices=get_group_preset_names(), scale=2)
+                        group_preset_name = gr.Textbox(label="角色组名称", placeholder="保存当前全部角色为预设", scale=2)
+                        group_save_btn = gr.Button("💾 保存角色组", size="sm", scale=1)
+                        group_load_btn = gr.Button("📂 加载角色组", size="sm", scale=1)
+
                     with gr.Row():
                         multi_spk_audio = gr.Audio(label="音色参考音频", type="filepath", scale=2)
                         multi_prompt_audio = gr.Audio(label="风格参考音频 (可选)", type="filepath", scale=2)
@@ -1030,6 +1117,17 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
         fn=multi_apply_scan,
         inputs=[multi_scan_drop],
         outputs=[multi_gpt, multi_sovits, multi_name],
+    )
+
+    group_save_btn.click(
+        fn=multi_save_group,
+        inputs=[group_preset_name],
+        outputs=[group_preset_drop, log_output],
+    )
+    group_load_btn.click(
+        fn=multi_load_group,
+        inputs=[group_preset_drop],
+        outputs=[multi_table, group_preset_drop, multi_cur_speaker, log_output],
     )
 
     multi_add_btn.click(
