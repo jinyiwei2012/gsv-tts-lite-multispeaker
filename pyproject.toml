@@ -41,6 +41,9 @@ dependencies = [
 [project.urls]
 "Homepage" = "https://github.com/chinokikiss/GSV-TTS-Lite"
 
+[project.scripts]
+gsv-tts = "gsv_tts.__main__:main"
+
 [tool.setuptools.packages.find]
 include = ["gsv_tts*"]
 
