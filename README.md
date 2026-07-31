@@ -461,8 +461,8 @@ python tests/test_sovits_sharing.py --speaker-gpt path/to/speaker_gpt.ckpt --spe
 python benchmarks/bench_multi_speaker.py
 ```
 
-> [!WARNING]
-> 基准脚本中**硬编码了外部微调模型路径**（如 `D:\Agent-LuoTianyi\...`），直接运行会失败；使用前需将 `SPEAKERS` 列表改为本地模型路径。
+> [!TIP]
+> 脚本默认自动扫描仓库内（或 `--models-dir` 指定目录）的 `.ckpt` / `.pth` 模型文件，按文件名前缀自动配对；也可用 `--gpt` / `--sovits` 显式指定测试模型对（可重复指定，支持 safetensors 目录）。仓库内没有模型时会打印提示并退出。
 
 ### 模型格式与兼容性
 

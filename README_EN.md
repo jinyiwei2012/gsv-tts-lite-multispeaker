@@ -461,8 +461,8 @@ python tests/test_sovits_sharing.py --speaker-gpt path/to/speaker_gpt.ckpt --spe
 python benchmarks/bench_multi_speaker.py
 ```
 
-> [!WARNING]
-> The benchmark script has **hardcoded external fine-tuned model paths** (e.g. `D:\Agent-LuoTianyi\...`) and will fail to run as-is; change the `SPEAKERS` list to your local model paths first.
+> [!TIP]
+> The script auto-discovers `.ckpt` / `.pth` model files under the repo (or `--models-dir`), pairing them by filename prefix; you can also specify model pairs explicitly with `--gpt` / `--sovits` (repeatable, safetensors directories accepted). It prints a hint and exits when no models are found.
 
 ### Model Formats & Compatibility
 

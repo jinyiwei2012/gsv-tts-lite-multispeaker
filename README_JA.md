@@ -461,8 +461,8 @@ python tests/test_sovits_sharing.py --speaker-gpt path/to/speaker_gpt.ckpt --spe
 python benchmarks/bench_multi_speaker.py
 ```
 
-> [!WARNING]
-> ベンチマークスクリプトには**外部ファインチューニングモデルのハードコードされた絶対パス**（例：`D:\Agent-LuoTianyi\...`）が含まれており、そのままでは実行できません。`SPEAKERS` リストをローカルのモデルパスに変更してください。
+> [!TIP]
+> スクリプトはリポジトリ内（または `--models-dir` 指定ディレクトリ）の `.ckpt` / `.pth` モデルファイルを自動検出し、ファイル名プレフィックスでペアリングします。`--gpt` / `--sovits` でモデルペアを明示指定することも可能です（繰り返し指定可、safetensors ディレクトリにも対応）。モデルが見つからない場合はヒントを表示して終了します。
 
 ### モデル形式と互換性
 

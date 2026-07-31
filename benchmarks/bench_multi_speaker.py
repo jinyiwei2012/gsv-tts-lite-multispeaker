@@ -1,16 +1,39 @@
 """MultiSpeakerTTS vs full-model benchmark (CPU reference environment).
 
 Compares:
-  A. MultiSpeakerTTS shared backbone (base + 3 speaker weights)
-  B. Full model loading (3 standalone TTS instances, one per speaker)
+  A. MultiSpeakerTTS shared backbone (base + N speaker weights)
+  B. Full model loading (N standalone TTS instances, one per speaker)
 
 Metrics: init time, peak RSS (GB), per-speaker warmup + avg inference
-latency, RTF. Uses the real fine-tuned models in the repo root.
+latency, RTF.
+
+Models are auto-discovered from the repo (paired .ckpt + .pth by filename
+prefix), or explicitly specified via --gpt/--sovits pairs.
+
+Usage:
+    # Auto-discover models under the repo root
+    python benchmarks/bench_multi_speaker.py
+
+    # Scan custom directory(ies) instead
+    python benchmarks/bench_multi_speaker.py --models-dir models
+
+    # Explicit model pairs (paired by order, repeatable; also accepts
+    # safetensors directory paths)
+    python benchmarks/bench_multi_speaker.py \
+        --gpt models/alice_gpt.ckpt   --sovits models/alice_sovits.pth \
+        --gpt models/bob_gpt.ckpt     --sovits models/bob_sovits.pth \
+        --name alice --name bob
+
+    # Skip the full-loading scenario, only benchmark shared backbone
+    python benchmarks/bench_multi_speaker.py --no-full
 """
 
+import argparse
+import gc
+import os
+import re
 import sys
 import time
-import gc
 from pathlib import Path
 
 import psutil
@@ -19,19 +42,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gsv_tts import TTS, MultiSpeakerTTS, SpeakerConfig
 
-TEXT = "今日も頑張りましょう、一緒に歩いていこう。"
-N_AVG = 2
-
-SPEAKERS = [
-    ("cyrene",    "CyreneV3.7-e25.ckpt",       "CyreneV3.7_e16_s1392.pth"),
-    ("shouanren", "shouanren-e20.ckpt",        "shouanren_e24_s1584.pth"),
-    ("luotianyi", r"D:\Agent-LuoTianyi\server\res\tts\luotianyi\custom_models\lty-tts_gpt_model.ckpt",
-                  r"D:\Agent-LuoTianyi\server\res\tts\luotianyi\custom_models\lty-tts_sovits_model.pth"),
-]
-
+DEFAULT_TEXT = "今日も頑張りましょう、一緒に歩いていこう。"
 SPK_AUDIO = "examples/laffey.mp3"
 PROMPT_AUDIO = "examples/AnAn.ogg"
 PROMPT_TEXT = "ちが……ちがう。レイア、貴様は間違っている。"
+
+_SKIP_DIRS = {
+    ".git", "__pycache__", ".venv", "venv", "node_modules",
+    "site-packages", ".idea", ".vscode",
+}
 
 
 def rss_gb() -> float:
@@ -46,10 +65,144 @@ def timed(fn, label):
     return result, dt
 
 
+def _normalize(name: str) -> str:
+    """Lowercase alphanumeric-only form used for filename comparison."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    n = 0
+    for x, y in zip(a, b):
+        if x != y:
+            break
+        n += 1
+    return n
+
+
+def _auto_name(gpt: Path, sovits: Path) -> str:
+    common = os.path.commonprefix([gpt.stem, sovits.stem]).rstrip("-_ .")
+    return common or gpt.stem
+
+
+def discover_models(dirs: list[Path], min_prefix: int = 4):
+    """Pair *.ckpt (GPT) with *.pth (SoVITS) by normalized filename prefix.
+
+    Greedy: for each .pth, take the not-yet-paired .ckpt with the longest
+    common prefix (>= min_prefix). Returns list of (gpt_path, sovits_path,
+    speaker_name).
+    """
+    gpt_files, sovits_files = [], []
+    for d in dirs:
+        for root, dirnames, filenames in os.walk(d):
+            dirnames[:] = [x for x in dirnames if x not in _SKIP_DIRS]
+            for fn in filenames:
+                p = Path(root) / fn
+                if fn.endswith(".ckpt"):
+                    gpt_files.append(p)
+                elif fn.endswith(".pth"):
+                    sovits_files.append(p)
+
+    pairs = []
+    unmatched = sorted(gpt_files)
+    for sovits in sorted(sovits_files):
+        sn = _normalize(sovits.stem)
+        best, best_score = None, 0
+        for gpt in unmatched:
+            score = _common_prefix_len(_normalize(gpt.stem), sn)
+            if score > best_score:
+                best, best_score = gpt, score
+        if best is not None and best_score >= min_prefix:
+            unmatched.remove(best)
+            pairs.append((best, sovits, _auto_name(best, sovits)))
+    return pairs
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(
+        description="MultiSpeakerTTS vs full-model benchmark"
+    )
+    parser.add_argument(
+        "--models-dir", action="append", default=[], metavar="DIR",
+        help="directory to scan for model files (repeatable; default: repo root)",
+    )
+    parser.add_argument(
+        "--gpt", action="append", default=[], metavar="PATH",
+        help="explicit GPT model path, paired with --sovits by order (repeatable; "
+             "also accepts safetensors directories)",
+    )
+    parser.add_argument(
+        "--sovits", action="append", default=[], metavar="PATH",
+        help="explicit SoVITS model path, paired with --gpt by order (repeatable; "
+             "also accepts safetensors directories)",
+    )
+    parser.add_argument(
+        "--name", action="append", default=[], metavar="NAME",
+        help="speaker name for explicit pairs, by order (optional)",
+    )
+    parser.add_argument(
+        "--text", default=DEFAULT_TEXT, help=f"benchmark text (default: {DEFAULT_TEXT!r})",
+    )
+    parser.add_argument(
+        "--avg", type=int, default=2, metavar="N",
+        help="inference repetitions per speaker (default: 2)",
+    )
+    parser.add_argument(
+        "--no-full", action="store_true",
+        help="skip scenario B (full model loading)",
+    )
+    parser.add_argument(
+        "--min-prefix", type=int, default=4, metavar="N",
+        help="min filename prefix length for auto pairing (default: 4)",
+    )
+    return parser.parse_args(argv)
+
+
+def resolve_pairs(args):
+    """Return list of (name, gpt_path, sovits_path)."""
+    if args.gpt or args.sovits:
+        if len(args.gpt) != len(args.sovits):
+            raise SystemExit(
+                "--gpt and --sovits must appear the same number of times "
+                f"(got {len(args.gpt)} vs {len(args.sovits)})"
+            )
+        pairs = []
+        for i, (gpt, sovits) in enumerate(zip(args.gpt, args.sovits)):
+            name = args.name[i] if i < len(args.name) and args.name[i] else _auto_name(Path(gpt), Path(sovits))
+            pairs.append((name, gpt, sovits))
+        return pairs
+
+    repo_root = Path(__file__).parent.parent
+    dirs = [Path(d) for d in args.models_dir] or [repo_root]
+    discovered = discover_models(dirs, args.min_prefix)
+    if not discovered:
+        print(
+            f"No paired .ckpt/.pth models found under: "
+            + ", ".join(str(d) for d in dirs),
+            file=sys.stderr,
+        )
+        print(
+            "Put your fine-tuned models in the repo (or --models-dir), or specify "
+            "them explicitly, e.g.:\n"
+            "  python benchmarks/bench_multi_speaker.py "
+            "--gpt path/to/gpt.ckpt --sovits path/to/sovits.pth",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return [(name, str(gpt), str(sovits)) for gpt, sovits, name in discovered]
+
+
 def main():
+    args = parse_args()
+    pairs = resolve_pairs(args)
+    n = len(pairs)
+    text = args.text
+
     print("=" * 60, flush=True)
     print("MultiSpeakerTTS vs Full Model Benchmark (CPU)", flush=True)
     print("=" * 60, flush=True)
+    print(f"Benchmarking {n} speaker pair(s):", flush=True)
+    for name, gpt, sovits in pairs:
+        print(f"  - {name}: {gpt} + {sovits}", flush=True)
 
     # ── Scenario A: MultiSpeakerTTS shared backbone ──
     print("\n[A] MultiSpeakerTTS shared backbone", flush=True)
@@ -66,13 +219,13 @@ def main():
                 prompt_audio_path=PROMPT_AUDIO,
                 prompt_audio_text=PROMPT_TEXT,
             )
-            for name, gpt, sovits in SPEAKERS
+            for name, gpt, sovits in pairs
         ]
         return MultiSpeakerTTS(speakers=speakers, use_bert=True)
 
-    mtts, init_a = timed(build_shared, f"init 3 speakers (shared)")
+    mtts, init_a = timed(build_shared, f"init {n} speakers (shared)")
 
-    for name, _, _ in SPEAKERS:
+    for name, _, _ in pairs:
         w = mtts._speakers[name]
         mode = "shared" if not w.is_full_model else "FULL-DEGRADED"
         print(f"  speaker '{name}': {mode}", flush=True)
@@ -81,74 +234,92 @@ def main():
     print(f"  RSS delta: {rss_a:.2f} GB", flush=True)
 
     results_a = {}
-    for name, _, _ in SPEAKERS:
-        _, w = timed(lambda n=name: mtts.infer(n, TEXT), f"warmup infer '{name}'")
+    for name, _, _ in pairs:
+        _, w = timed(lambda n=name: mtts.infer(n, text), f"warmup infer '{name}'")
         times = []
-        for i in range(N_AVG):
+        for _ in range(args.avg):
             t0 = time.time()
-            mtts.infer(name, TEXT)
+            mtts.infer(name, text)
             times.append(time.time() - t0)
         avg = sum(times) / len(times)
         results_a[name] = (w, avg)
         print(f"  infer '{name}': warmup {w:.1f}s, avg {avg:.1f}s", flush=True)
 
     # ── Scenario B: full model per speaker ──
-    print("\n[B] Full model loading (3 standalone TTS)", flush=True)
-    gc.collect()
-    rss_before = rss_gb()
+    if args.no_full:
+        print("\n[Skipped] Scenario B (--no-full)", flush=True)
+        results_b, instances, rss_b = None, {}, 0.0
+    else:
+        print(f"\n[B] Full model loading ({n} standalone TTS)", flush=True)
+        gc.collect()
+        rss_before = rss_gb()
 
-    instances = {}
-    for name, gpt, sovits in SPEAKERS:
-        t = TTS(use_bert=True)
+        instances = {}
+        for name, gpt, sovits in pairs:
+            t = TTS(use_bert=True)
 
-        def load(t=t, gpt=gpt, sovits=sovits):
-            t.load_gpt_model(gpt)
-            t.load_sovits_model(sovits)
+            def load(t=t, gpt=gpt, sovits=sovits):
+                t.load_gpt_model(gpt)
+                t.load_sovits_model(sovits)
 
-        _, dt = timed(load, f"load full models '{name}'")
-        instances[name] = (t, dt)
+            _, dt = timed(load, f"load full models '{name}'")
+            instances[name] = (t, dt)
 
-    rss_b = rss_gb() - rss_before
-    print(f"  RSS delta: {rss_b:.2f} GB", flush=True)
+        rss_b = rss_gb() - rss_before
+        print(f"  RSS delta: {rss_b:.2f} GB", flush=True)
 
-    results_b = {}
-    for name, _, _ in SPEAKERS:
-        t = instances[name][0]
-        _, w = timed(lambda n=name: t.infer(
-            spk_audio_path=SPK_AUDIO, prompt_audio_path=PROMPT_AUDIO,
-            prompt_audio_text=PROMPT_TEXT, text=TEXT,
-        ), f"warmup infer '{name}' (full)")
-        times = []
-        for i in range(N_AVG):
-            t0 = time.time()
-            t.infer(
-                spk_audio_path=SPK_AUDIO, prompt_audio_path=PROMPT_AUDIO,
-                prompt_audio_text=PROMPT_TEXT, text=TEXT,
+        results_b = {}
+        for name, _, _ in pairs:
+            t = instances[name][0]
+            _, w = timed(
+                lambda n=name: t.infer(
+                    spk_audio_path=SPK_AUDIO, prompt_audio_path=PROMPT_AUDIO,
+                    prompt_audio_text=PROMPT_TEXT, text=text,
+                ),
+                f"warmup infer '{name}' (full)",
             )
-            times.append(time.time() - t0)
-        avg = sum(times) / len(times)
-        results_b[name] = (w, avg)
-        print(f"  infer '{name}': warmup {w:.1f}s, avg {avg:.1f}s", flush=True)
+            times = []
+            for _ in range(args.avg):
+                t0 = time.time()
+                t.infer(
+                    spk_audio_path=SPK_AUDIO, prompt_audio_path=PROMPT_AUDIO,
+                    prompt_audio_text=PROMPT_TEXT, text=text,
+                )
+                times.append(time.time() - t0)
+            avg = sum(times) / len(times)
+            results_b[name] = (w, avg)
+            print(f"  infer '{name}': warmup {w:.1f}s, avg {avg:.1f}s", flush=True)
 
     # ── Summary ──
     print("\n" + "=" * 60, flush=True)
     print("SUMMARY", flush=True)
     print("=" * 60, flush=True)
     print(f"{'':30s} {'Shared (A)':>12s} {'Full (B)':>12s} {'Speedup':>10s}", flush=True)
-    print(f"{'Init (3 speakers)':30s} {init_a:>10.1f}s {sum(v[1] for v in instances.values()):>10.1f}s", flush=True)
-    print(f"{'Peak RSS delta':30s} {rss_a:>10.2f}G {rss_b:>10.2f}G {'saved ' + f'{100*(1-rss_a/rss_b):.0f}%' if rss_b > 0 else '':>10s}", flush=True)
-    for name, _, _ in SPEAKERS:
+    print(f"{f'Init ({n} speakers)':30s} {init_a:>10.1f}s "
+          f"{sum(v[1] for v in instances.values()) if not args.no_full else 0:>10.1f}s", flush=True)
+    if not args.no_full and rss_b > 0:
+        print(f"{'Peak RSS delta':30s} {rss_a:>10.2f}G {rss_b:>10.2f}G "
+              f"{'saved ' + f'{100*(1-rss_a/rss_b):.0f}%':>10s}", flush=True)
+    else:
+        print(f"{'Peak RSS delta':30s} {rss_a:>10.2f}G", flush=True)
+    for name, _, _ in pairs:
         wa, aa = results_a[name]
-        wb, ab = results_b[name]
-        print(f"{'infer avg ' + name:30s} {aa:>10.1f}s {ab:>10.1f}s {ab/aa:>8.2f}x", flush=True)
+        if args.no_full:
+            print(f"{'infer avg ' + name:30s} {aa:>10.1f}s", flush=True)
+        else:
+            wb, ab = results_b[name]
+            print(f"{'infer avg ' + name:30s} {aa:>10.1f}s {ab:>10.1f}s {ab/aa:>8.2f}x", flush=True)
 
     # RTF for first speaker (audio len ~ text duration)
-    clip = mtts.infer(SPEAKERS[0][0], TEXT)
+    clip = mtts.infer(pairs[0][0], text)
     audio_len = clip.audio_len_s
-    rtf_a = results_a[SPEAKERS[0][0]][1] / audio_len
-    rtf_b = results_b[SPEAKERS[0][0]][1] / audio_len
+    rtf_a = results_a[pairs[0][0]][1] / audio_len
     print(f"\nAudio length: {audio_len:.2f}s", flush=True)
-    print(f"RTF shared: {rtf_a:.3f} | RTF full: {rtf_b:.3f}", flush=True)
+    if not args.no_full:
+        rtf_b = results_b[pairs[0][0]][1] / audio_len
+        print(f"RTF shared: {rtf_a:.3f} | RTF full: {rtf_b:.3f}", flush=True)
+    else:
+        print(f"RTF shared: {rtf_a:.3f}", flush=True)
 
 
 if __name__ == "__main__":
