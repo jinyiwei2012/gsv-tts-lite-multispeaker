@@ -114,7 +114,7 @@
 - [x] #3 剧本对话模式（`MultiSpeakerTTS.infer_script` / `parse_script`）
 - [x] #4 多角色配置导出/导入（WebUI 角色组预设 JSON）
 - [x] #5 测试体系（pytest，3 个测试文件 22 例，见 `tests/`）
-- [x] #6 CI（`.github/workflows/ci.yml`，Python 3.10-3.12）
+- [x] #6 CI（已删除，不再维护）
 - [x] #7 模型下载容错（`Download._download_zip_with_fallback` 镜像链）
 - [x] #8 音频缓存自动失效（mtime+size 指纹）
 - [x] #9 Benchmark 报告化（`--output report.json`）
