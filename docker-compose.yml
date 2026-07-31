@@ -1,0 +1,15 @@
+services:
+  gsv-tts:
+    build: .
+    image: gsv-tts-lite-multispeaker:latest
+    ports:
+      - "9880:9880"
+    volumes:
+      # 预训练模型缓存（避免每次重建容器重新下载数 GB）
+      - gsv-models:/root/.cache/gsv
+      # 你的微调角色模型目录（挂载后通过 API 的模型路径引用）
+      - ./models:/app/models
+    restart: unless-stopped
+
+volumes:
+  gsv-models:
