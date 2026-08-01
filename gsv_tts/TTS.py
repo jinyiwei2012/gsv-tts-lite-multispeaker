@@ -56,6 +56,7 @@ class TTS:
         use_jieba_fast: bool = False,
         always_load_cnhubert: bool = False,
         always_load_sv: bool = False,
+        auto_bert: bool = True,
     ):
         """
         Initializes GSV TTS engine.
@@ -68,6 +69,7 @@ class TTS:
             dtype (str): The data type for model inference (e.g., "float16", "float32").
             use_flash_attn (bool): Whether to enable Flash Attention for faster inference.
             use_bert (bool): Whether to use BERT for enhanced Chinese semantic understanding. If True, BERT is loaded at initialization.
+            auto_bert (bool): Lazily load BERT when text is processed as Chinese.
             use_jieba_fast (bool): Whether to use jieba-fast for faster Chinese text segmentation. `jieba-fast` needs to be installed.
             always_load_cnhubert (bool): Whether to keep the CNHubert model loaded in VRAM. Set to True to accelerate Voice Conversion.
             always_load_sv (bool): Whether to keep the Speaker Verification model loaded in VRAM. Set to True to accelerate Speaker Verification.
@@ -90,6 +92,7 @@ class TTS:
         
         self.always_load_cnhubert = always_load_cnhubert
         self.always_load_sv = always_load_sv
+        self.auto_bert = auto_bert
         if models_dir is None: models_dir = Path.home() / ".cache" / "gsv"
         self.models_dir = models_dir
         if global_config.models_dir is None: global_config.models_dir = models_dir
@@ -136,6 +139,7 @@ class TTS:
                     dir=self.models_dir,
                 )
             self.tts_config.cnroberta = CNRoberta(self.cnroberta_path, self.tts_config)
+            self._bert_loaded = True
         
         self.cnhubert_model = None
         self.sv_model = None
@@ -207,6 +211,10 @@ class TTS:
 
         self._infer_lock.acquire()
         try:
+            self._ensure_bert_for_texts(
+                [text, prompt_audio_text],
+                [text_language, prompt_language],
+            )
             if not self._check_pause(text):
                 text += "."
 
@@ -363,6 +371,10 @@ class TTS:
 
         self._infer_lock.acquire()
         try:
+            self._ensure_bert_for_texts(
+                [text, prompt_audio_text],
+                [text_language, prompt_language],
+            )
             if not self._check_pause(text):
                 text += "."
 
@@ -538,9 +550,6 @@ class TTS:
         if isinstance(texts, str):
             texts = [texts]
 
-        if any(self._contains_chinese(t) for t in texts):
-            self._ensure_bert_loaded()
-
         texts = [t if self._check_pause(t) else t + "." for t in texts]
 
         if not is_cut_text:
@@ -565,6 +574,11 @@ class TTS:
             text_languages = [text_languages] * n
         if isinstance(prompt_languages, str):
             prompt_languages = [prompt_languages] * n
+
+        self._ensure_bert_for_texts(
+            [*texts, *prompt_audio_texts],
+            [*text_languages, *prompt_languages],
+        )
 
         gpt_model = self._resolve_gpt_model(gpt_model)
         sovits_model = self._resolve_sovits_model(sovits_model)
@@ -1569,6 +1583,8 @@ class TTS:
             if isinstance(prompt_audio_texts, str):
                 prompt_audio_texts = [prompt_audio_texts]*len(prompt_audio_paths)
 
+            self._ensure_bert_for_texts(prompt_audio_texts, prompt_language)
+
             for prompt_audio_path, prompt_audio_text in zip(prompt_audio_paths, prompt_audio_texts):
                 if not prompt_audio_text or not prompt_audio_text.strip():
                     raise ValueError(
@@ -1685,7 +1701,24 @@ class TTS:
             if segment['lang'] == 'zh':
                 return True
         return False
-    
+
+    def _ensure_bert_for_texts(self, texts, languages="auto"):
+        if isinstance(texts, str):
+            texts = [texts]
+        if isinstance(languages, str):
+            languages = [languages] * len(texts)
+
+        needs_bert = any(
+            bool(text)
+            and (
+                language == "zh"
+                or (language == "auto" and self._contains_chinese(text))
+            )
+            for text, language in zip(texts, languages)
+        )
+        if needs_bert:
+            self._ensure_bert_loaded()
+
     def _ensure_bert_loaded(self):
         if self._bert_loaded:
             return
