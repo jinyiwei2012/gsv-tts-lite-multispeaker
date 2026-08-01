@@ -209,9 +209,6 @@ class MultiSpeakerTTS:
             gpt_cache: Override GPT CUDA Graph static cache sizes.
             sovits_cache: Override SoVITS CUDA Graph static cache sizes.
         """
-        if not speakers:
-            raise ValueError("At least one SpeakerConfig is required.")
-
         # ── Create underlying TTS instance (shared infrastructure) ──
         tts_kwargs = {
             "models_dir": models_dir,
