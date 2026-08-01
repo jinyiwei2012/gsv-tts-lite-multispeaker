@@ -23,14 +23,20 @@ from contextlib import asynccontextmanager
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-import httpx
 import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse, Response, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
 from gsv_tts import TTS, MultiSpeakerTTS, SpeakerConfig, ConfigMismatchError
+from API.audio_download import (
+    TemporaryAudioRegistry,
+    cleanup_downloaded_audio,
+    cleanup_downloaded_audio_after,
+    download_remote_audio,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,8 +88,11 @@ async def lifespan(app: FastAPI):
     else:
         print("ASR 模型已禁用")
     
-    yield
-    # Shutdown: cleanup
+    try:
+        yield
+    finally:
+        speaker_audio_registry.clear()
+
 
 app = FastAPI(
     title="GSV-TTS 个人化应用 API",
@@ -92,6 +101,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)
 
@@ -99,6 +109,8 @@ tts: Optional[TTS] = None
 multi_tts: Optional[MultiSpeakerTTS] = None
 asr = None
 temp_dir = tempfile.mkdtemp(prefix="gsv_tts_personal_")
+MAX_AUDIO_DOWNLOAD_BYTES = 50 * 1024 * 1024
+speaker_audio_registry = TemporaryAudioRegistry(temp_dir)
 use_asr_flag = True
 
 # Module-level default for models_dir — allow overriding via env var or __main__
@@ -123,23 +135,11 @@ def resolve_audio_path(path: str) -> str:
 
 
 async def download_audio(url: str) -> str:
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.get(url, follow_redirects=True)
-        response.raise_for_status()
-    
-    ext = ".wav"
-    content_type = response.headers.get("content-type", "")
-    if "mp3" in content_type or url.lower().endswith(".mp3"):
-        ext = ".mp3"
-    elif "ogg" in content_type or url.lower().endswith(".ogg"):
-        ext = ".ogg"
-    elif "flac" in content_type or url.lower().endswith(".flac"):
-        ext = ".flac"
-    
-    temp_path = os.path.join(temp_dir, f"download_{uuid.uuid4().hex}{ext}")
-    with open(temp_path, "wb") as f:
-        f.write(response.content)
-    
+    temp_path = await download_remote_audio(
+        url,
+        temp_dir,
+        max_bytes=MAX_AUDIO_DOWNLOAD_BYTES,
+    )
     logging.info(f"下载音频到: {temp_path}")
     return temp_path
 
@@ -652,6 +652,9 @@ async def tts_stream(request: TTSStreamRequest):
     - event: done - 生成完成
     - event: error - 错误信息
     """
+    downloaded_audio = []
+    cleanup_deferred = False
+    worker_future = None
     try:
         speaker_audio = resolve_audio_path(request.speaker_audio)
         prompt_audio = resolve_audio_path(request.prompt_audio)
@@ -659,9 +662,11 @@ async def tts_stream(request: TTSStreamRequest):
         
         if is_url(speaker_audio):
             speaker_audio = await download_audio(speaker_audio)
+            downloaded_audio.append(speaker_audio)
         
         if is_url(prompt_audio):
             prompt_audio = await download_audio(prompt_audio)
+            downloaded_audio.append(prompt_audio)
         
         if prompt_text is None or prompt_text == "":
             prompt_text = transcribe_audio(prompt_audio)
@@ -676,6 +681,7 @@ async def tts_stream(request: TTSStreamRequest):
         final_prompt_audio = prompt_audio
         
         async def generate():
+            nonlocal worker_future
             try:
                 loop = asyncio.get_running_loop()
                 chunk_queue: asyncio.Queue = asyncio.Queue()
@@ -711,7 +717,7 @@ async def tts_stream(request: TTSStreamRequest):
                     finally:
                         loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
 
-                loop.run_in_executor(None, stream_infer)
+                worker_future = loop.run_in_executor(None, stream_infer)
 
                 total_len = 0
                 while True:
@@ -740,21 +746,34 @@ async def tts_stream(request: TTSStreamRequest):
             except Exception as e:
                 logging.error(f"流式推理错误: {e}")
                 yield f"event: error\ndata: {json.dumps({'error': str(e)}, ensure_ascii=False)}\n\n"
+
+        async def cleanup_stream_audio():
+            await cleanup_downloaded_audio_after(
+                worker_future,
+                downloaded_audio,
+                temp_dir,
+            )
         
-        return StreamingResponse(
+        response = StreamingResponse(
             generate(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",
-            }
+            },
+            background=BackgroundTask(cleanup_stream_audio),
         )
+        cleanup_deferred = True
+        return response
         
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if not cleanup_deferred:
+            cleanup_downloaded_audio(downloaded_audio, temp_dir)
 
 
 @app.post("/tts/batched")
@@ -773,6 +792,7 @@ async def tts_batched(request: TTSBatchedRequest):
     - filenames: 生成的音频文件名列表
     - subtitles: 字幕信息(可选)
     """
+    downloaded_audio = []
     try:
         speaker_audio = resolve_audio_path(request.speaker_audio)
         prompt_audio = resolve_audio_path(request.prompt_audio)
@@ -780,9 +800,11 @@ async def tts_batched(request: TTSBatchedRequest):
         
         if is_url(speaker_audio):
             speaker_audio = await download_audio(speaker_audio)
+            downloaded_audio.append(speaker_audio)
         
         if is_url(prompt_audio):
             prompt_audio = await download_audio(prompt_audio)
+            downloaded_audio.append(prompt_audio)
         
         if prompt_text is None or prompt_text == "":
             prompt_text = transcribe_audio(prompt_audio)
@@ -839,6 +861,8 @@ async def tts_batched(request: TTSBatchedRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        cleanup_downloaded_audio(downloaded_audio, temp_dir)
 
 
 @app.get("/audio/{filename}")
@@ -846,7 +870,9 @@ async def get_audio(filename: str):
     """获取生成的音频文件"""
     file_path = (output_dir / filename).resolve()
     # Prevent path traversal
-    if not str(file_path).startswith(str(output_dir.resolve())):
+    try:
+        file_path.relative_to(output_dir.resolve())
+    except ValueError:
         raise HTTPException(status_code=403, detail="Access denied")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="文件未找到")
@@ -874,7 +900,13 @@ async def multi_init(request: MultiInitRequest):
         if request.base_sovits_path:
             kwargs["base_sovits_path"] = request.base_sovits_path
 
-        multi_tts = MultiSpeakerTTS(**kwargs)
+        new_multi_tts = MultiSpeakerTTS(**kwargs)
+        if multi_tts is None:
+            multi_tts = new_multi_tts
+        else:
+            with multi_tts._tts._infer_lock:
+                speaker_audio_registry.clear()
+                multi_tts = new_multi_tts
         return {"success": True, "message": "MultiSpeakerTTS engine initialized"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -887,14 +919,18 @@ async def multi_add(request: MultiAddSpeakerRequest):
     if multi_tts is None:
         raise HTTPException(status_code=400, detail="MultiSpeakerTTS not initialized. Call /multi-speaker/init first.")
 
+    downloaded_audio = []
+    speaker_registered = False
     try:
         speaker_audio = resolve_audio_path(request.speaker_audio)
         prompt_audio = resolve_audio_path(request.prompt_audio) if request.prompt_audio else None
 
         if is_url(speaker_audio):
             speaker_audio = await download_audio(speaker_audio)
+            downloaded_audio.append(speaker_audio)
         if prompt_audio and is_url(prompt_audio):
             prompt_audio = await download_audio(prompt_audio)
+            downloaded_audio.append(prompt_audio)
 
         spk = SpeakerConfig(
             name=request.name,
@@ -905,6 +941,8 @@ async def multi_add(request: MultiAddSpeakerRequest):
             prompt_audio_text=request.prompt_text,
         )
         multi_tts.add_speaker(spk)
+        speaker_audio_registry.adopt(request.name, downloaded_audio)
+        speaker_registered = True
         w = multi_tts._speakers[request.name]
         mode = "shared" if not w.is_full_model else "full_model_degraded"
 
@@ -921,6 +959,9 @@ async def multi_add(request: MultiAddSpeakerRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if not speaker_registered:
+            cleanup_downloaded_audio(downloaded_audio, temp_dir)
 
 
 @app.post("/multi-speaker/remove")
@@ -932,6 +973,7 @@ async def multi_remove(request: MultiRemoveSpeakerRequest):
 
     try:
         multi_tts.remove_speaker(request.name)
+        speaker_audio_registry.release(request.name)
         return {"success": True, "message": f"Speaker '{request.name}' removed"}
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
