@@ -24,8 +24,6 @@ import os
 import tempfile
 import logging
 
-app = FastAPI(title="GSV-TTS 异步 API", version="1.1", lifespan=lifespan)
-
 models_dir = project_root / "API" / "models"
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)
@@ -239,6 +237,8 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown: cleanup resources if needed
 
+
+app = FastAPI(title="GSV-TTS 异步 API", version="1.1", lifespan=lifespan)
 
 @app.get("/")
 async def root():
