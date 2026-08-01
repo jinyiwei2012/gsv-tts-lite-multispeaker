@@ -37,13 +37,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 
-app = FastAPI(
-    title="GSV-TTS 个人化应用 API",
-    description="简单、功能全的TTS API，支持流式和批量两种推理模式",
-    version="1.0",
-    lifespan=lifespan,
-)
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle for the FastAPI application."""
@@ -91,6 +84,13 @@ async def lifespan(app: FastAPI):
     
     yield
     # Shutdown: cleanup
+
+app = FastAPI(
+    title="GSV-TTS 个人化应用 API",
+    description="简单、功能全的TTS API，支持流式和批量两种推理模式",
+    version="1.0",
+    lifespan=lifespan,
+)
 
 output_dir = project_root / "output"
 output_dir.mkdir(exist_ok=True)
