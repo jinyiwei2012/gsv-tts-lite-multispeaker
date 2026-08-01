@@ -2,7 +2,10 @@ import os
 import time
 import logging
 import requests
+import stat
+import tempfile
 import zipfile
+from hashlib import sha256
 from tqdm import tqdm
 from pathlib import Path
 
@@ -12,13 +15,35 @@ from pathlib import Path
 #   "huggingface" → Hugging Face (international)
 #   "hf-mirror" → hf-mirror.com (HF proxy for China)
 _MIRROR_OVERRIDE = os.environ.get("GSV_MIRROR", "")
+_HF_RUNTIME_REVISION = "0978701405063b68206b7b5784fe628b84637a6d"
+_UPSTREAM_MODEL_REVISION = "336b2ec4e8d4ac74740798dd40af44e74659ecaf"
 modelscope_base_url = "https://modelscope.cn/models/chinokiki/GPTSoVITS-RT/resolve/master/%s"
-huggingface_base_url = "https://huggingface.co/cnmds/GPTSoVITS-RT/resolve/main/%s?download=true"
-hf_mirror_base_url = "https://hf-mirror.com/cnmds/GPTSoVITS-RT/resolve/main/%s?download=true"
+huggingface_base_url = (
+    "https://huggingface.co/cnmds/GPTSoVITS-RT/resolve/"
+    f"{_HF_RUNTIME_REVISION}/%s?download=true"
+)
+hf_mirror_base_url = (
+    "https://hf-mirror.com/cnmds/GPTSoVITS-RT/resolve/"
+    f"{_HF_RUNTIME_REVISION}/%s?download=true"
+)
+upstream_model_base_url = (
+    "https://huggingface.co/lj1995/GPT-SoVITS/resolve/"
+    f"{_UPSTREAM_MODEL_REVISION}/%s?download=true"
+)
+upstream_model_mirror_url = (
+    "https://hf-mirror.com/lj1995/GPT-SoVITS/resolve/"
+    f"{_UPSTREAM_MODEL_REVISION}/%s?download=true"
+)
+g2p_release_base_url = (
+    "https://github.com/chinokikiss/GSV-TTS-Lite/"
+    "releases/download/g2p/%s"
+)
 
 base_url = None
 
 _DEFAULT_TIMEOUT = 30  # seconds
+_MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024 * 1024
+_MAX_EXTRACTED_BYTES = 10 * 1024 * 1024 * 1024
 
 # Default GPT/SoVITS model files (not in pretrained_models zip)
 _DEFAULT_MODEL_FILES = [
@@ -26,67 +51,149 @@ _DEFAULT_MODEL_FILES = [
     "s2Gv2ProPlus.pth",
 ]
 
+_DEFAULT_MODEL_PATHS = {
+    "s1v3.ckpt": "s1v3.ckpt",
+    "s2Gv2ProPlus.pth": "v2Pro/s2Gv2ProPlus.pth",
+}
 
-def download_file(url, filename, timeout=_DEFAULT_TIMEOUT):
-    """Download a file with timeout, progress bar, and integrity check."""
-    logging.info(f"Downloading model from {url}")
+# SHA-256 values published by the backing repositories (HF LFS OIDs and
+# ModelScope/GitHub release digests). Mirror-specific archives are different
+# byte streams and therefore intentionally have separate entries.
+_DOWNLOAD_SHA256 = {
+    (modelscope_base_url, "pretrained_models5.zip"): (
+        "534d4fc57fde79e83dcd7af311a47f58530861665bcbd75c6c4c8da0b677648c"
+    ),
+    (huggingface_base_url, "pretrained_models6.zip"): (
+        "640ab803939912c3b96bee1aa7271100225dbea16341075a9f9c6079c0be097d"
+    ),
+    (hf_mirror_base_url, "pretrained_models6.zip"): (
+        "640ab803939912c3b96bee1aa7271100225dbea16341075a9f9c6079c0be097d"
+    ),
+    (g2p_release_base_url, "g2p.zip"): (
+        "8bb1d58798c49c7913f24ca53ebe1ed2f69d0fda5c7c6e158b7a36d4a160e148"
+    ),
+}
 
+_DEFAULT_MODEL_SHA256 = {
+    "s1v3.ckpt": (
+        "87133414860ea14ff6620c483a3db5ed07b44be42e2c3fcdad65523a729a745a"
+    ),
+    "s2Gv2ProPlus.pth": (
+        "d42a22bbbf65fb2bbdd45ad6a66841156977db45c7aabe0a6992ff378d9c7d3b"
+    ),
+}
+
+
+def _file_matches_sha256(path, expected_sha256):
+    digest = sha256()
     try:
+        with open(path, "rb") as file:
+            for chunk in iter(lambda: file.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return False
+    return digest.hexdigest().lower() == expected_sha256.lower()
+
+
+def download_file(url, filename, timeout=_DEFAULT_TIMEOUT, expected_sha256=None):
+    """Download, verify, and atomically replace a file."""
+    logging.info(f"Downloading model from {url}")
+    target = Path(filename)
+    partial_path = None
+    response = None
+    try:
+        if expected_sha256 is not None:
+            expected_sha256 = expected_sha256.lower()
+            if len(expected_sha256) != 64 or any(
+                char not in "0123456789abcdef" for char in expected_sha256
+            ):
+                raise ValueError("expected_sha256 must be a 64-character hex digest")
+
         response = requests.get(url, stream=True, timeout=timeout)
         response.raise_for_status()
-    except requests.RequestException as e:
-        logging.error(f"Download request failed for {url}: {e}")
-        return False
-
-    total_size_in_bytes = int(response.headers.get('content-length', 0))
-    block_size = 1024
-
-    try:
-        with tqdm(total=total_size_in_bytes, unit='iB', unit_scale=True) as progress_bar:
-            with open(filename, 'wb') as file:
-                for data in response.iter_content(block_size):
-                    if data:
-                        progress_bar.update(len(data))
-                        file.write(data)
-    except Exception as e:
-        logging.error(f"Download interrupted: {e}")
-        # Remove partial file
         try:
-            Path(filename).unlink(missing_ok=True)
-        except Exception:
-            pass
-        return False
+            total_size_in_bytes = int(response.headers.get("content-length", 0))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("invalid Content-Length header") from exc
+        if total_size_in_bytes < 0 or total_size_in_bytes > _MAX_DOWNLOAD_BYTES:
+            raise ValueError(
+                f"download size is outside the allowed range: "
+                f"{total_size_in_bytes} bytes"
+            )
 
-    downloaded_size = Path(filename).stat().st_size
-    if total_size_in_bytes != 0 and downloaded_size != total_size_in_bytes:
-        logging.error(
-            f"Incomplete download: {downloaded_size}/{total_size_in_bytes} bytes. "
-            f"Removing partial file."
-        )
-        Path(filename).unlink(missing_ok=True)
-        return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        digest = sha256()
+        downloaded_size = 0
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=target.parent,
+            prefix=f".{target.name}.",
+            suffix=".part",
+            delete=False,
+        ) as file:
+            partial_path = Path(file.name)
+            with tqdm(
+                total=total_size_in_bytes,
+                unit="iB",
+                unit_scale=True,
+            ) as progress_bar:
+                for data in response.iter_content(64 * 1024):
+                    if not data:
+                        continue
+                    downloaded_size += len(data)
+                    if downloaded_size > _MAX_DOWNLOAD_BYTES:
+                        raise ValueError("download exceeds maximum size")
+                    digest.update(data)
+                    progress_bar.update(len(data))
+                    file.write(data)
 
-    logging.info(f"Download complete: {filename}")
-    return True
+        if total_size_in_bytes and downloaded_size != total_size_in_bytes:
+            raise ValueError(
+                f"incomplete download: {downloaded_size}/"
+                f"{total_size_in_bytes} bytes"
+            )
+        if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+            raise ValueError(f"checksum mismatch for {target}")
+
+        os.replace(partial_path, target)
+        partial_path = None
+        logging.info(f"Download complete: {target}")
+        return True
+    except Exception as e:
+        logging.error(f"Download failed for {url}: {e}")
+        return False
+    finally:
+        if response is not None:
+            response.close()
+        if partial_path is not None:
+            partial_path.unlink(missing_ok=True)
 
 
 def unzip_file(zip_filepath, extract_to):
     """安全解压 ZIP 文件，防止路径遍历攻击"""
     logging.info(f"Extracting {zip_filepath}...")
     extract_to = Path(extract_to).resolve()
+    extract_to.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_filepath, 'r') as zip_ref:
+        extracted_size = 0
         for member in zip_ref.infolist():
             member_path = (extract_to / member.filename).resolve()
             # 确保解压路径在目标目录内
-            if not str(member_path).startswith(str(extract_to)):
+            try:
+                member_path.relative_to(extract_to)
+            except ValueError:
                 raise ValueError(
                     f"Security: attempted path traversal in zip: {member.filename}"
                 )
-            # 检查解压后文件总大小（防止 zip bomb）
-            if member.file_size > 10 * 1024 * 1024 * 1024:  # 10GB
+            if stat.S_ISLNK(member.external_attr >> 16):
                 raise ValueError(
-                    f"Security: file too large in zip: {member.filename} ({member.file_size} bytes)"
+                    f"Security: symbolic links are not allowed in zip: "
+                    f"{member.filename}"
                 )
+            # 检查解压后文件总大小（防止 zip bomb）
+            extracted_size += member.file_size
+            if extracted_size > _MAX_EXTRACTED_BYTES:
+                raise ValueError("Security: extracted zip exceeds maximum size")
         zip_ref.extractall(extract_to)
     logging.info(f"Extraction complete, files located at: {extract_to}")
 
@@ -169,14 +276,23 @@ def get_base_url(force_refresh=False):
     return base_url
 
 
-def download_model(filename, dir, download_url=None):
+def download_model(filename, dir, download_url=None, expected_sha256=None):
     if download_url is None:
         download_url = get_base_url()
         
     url = download_url % (filename)
     zip_filename = Path(dir) / filename
+    expected_sha256 = expected_sha256 or _DOWNLOAD_SHA256.get(
+        (download_url, filename)
+    )
+    if expected_sha256 is None:
+        raise ValueError(f"No trusted SHA-256 configured for {filename}")
 
-    if not download_file(url, zip_filename):
+    if not download_file(
+        url,
+        zip_filename,
+        expected_sha256=expected_sha256,
+    ):
         raise RuntimeError(f"Download of {filename} failed after exhausting retries")
 
     unzip_file(zip_filename, os.path.dirname(zip_filename))
@@ -216,7 +332,7 @@ def check_pretrained_models(models_dir):
             )
 
             download_model(
-                download_url="https://github.com/chinokikiss/GSV-TTS-Lite/releases/download/g2p/%s",
+                download_url=g2p_release_base_url,
                 filename="g2p.zip",
                 dir=models_dir,
             )
@@ -230,7 +346,7 @@ def check_pretrained_models(models_dir):
             )
 
             download_model(
-                download_url="https://github.com/chinokikiss/GSV-TTS-Lite/releases/download/g2p/%s",
+                download_url=g2p_release_base_url,
                 filename="g2p.zip",
                 dir=models_dir,
             )
@@ -244,44 +360,50 @@ def ensure_default_models(models_dir):
 
     for filename in _DEFAULT_MODEL_FILES:
         filepath = Path(models_dir) / filename
-        if filepath.exists():
+        expected_sha256 = _DEFAULT_MODEL_SHA256[filename]
+        if filepath.exists() and _file_matches_sha256(filepath, expected_sha256):
             logging.info(f"Default model already exists: {filename}")
             continue
+        if filepath.exists():
+            logging.warning(f"Default model checksum mismatch: {filepath}")
 
-        url = base % filename
+        remote_path = _DEFAULT_MODEL_PATHS[filename]
+        sources = [upstream_model_base_url, upstream_model_mirror_url]
+        if base in {modelscope_base_url, hf_mirror_base_url}:
+            sources.reverse()
         logging.info(f"Downloading default model: {filename}")
-        try:
-            if not download_file(url, filepath):
-                raise RuntimeError(f"Download incomplete: {filename}")
-        except Exception as e:
-            logging.warning(f"Primary download failed for {filename}: {e}")
-
-            # Fallback chain
-            fallbacks = []
-            if base != hf_mirror_base_url:
-                fallbacks.append(("hf-mirror.com", hf_mirror_base_url))
-            if base != huggingface_base_url:
-                fallbacks.append(("Hugging Face", huggingface_base_url))
-            if base != modelscope_base_url:
-                fallbacks.append(("ModelScope", modelscope_base_url))
-
-            for name, fb_url in fallbacks:
-                try:
-                    logging.info(f"Trying {name} fallback: {filename}")
-                    if download_file(fb_url % filename, filepath):
-                        logging.info(f"Downloaded via {name}")
-                        break
-                except Exception as e2:
-                    logging.warning(f"{name} fallback failed: {e2}")
-            else:
-                raise RuntimeError(
-                    f"Failed to download {filename} from all sources. "
-                    f"Please download manually and place it in {models_dir}"
-                )
+        for source in sources:
+            if download_file(
+                source % remote_path,
+                filepath,
+                expected_sha256=expected_sha256,
+            ):
+                break
+        else:
+            raise RuntimeError(
+                f"Failed to download {filename} from all sources. "
+                f"Please download manually and place it in {models_dir}"
+            )
 
 
 cnroberta_int8_modelscope_base_url = "https://modelscope.cn/models/ltyytn/cnroberta_int8_dynamic/resolve/master/%s"
-cnroberta_int8_huggingface_base_url = "https://huggingface.co/cnmds/GPTSoVITS-RT/resolve/main/int8/cnroberta/%s?download=true"
+cnroberta_int8_huggingface_base_url = (
+    "https://huggingface.co/cnmds/GPTSoVITS-RT/resolve/"
+    f"{_HF_RUNTIME_REVISION}/int8/cnroberta/%s?download=true"
+)
+
+_CNROBERTA_INT8_SHA256 = {
+    "config.json": (
+        "3d57de2fd7e80d0e5c8ff194f0bbb6baa10df7e43fc262a0cc71298a78b0a3e5"
+    ),
+    "tokenizer.json": (
+        "173796956820ea27bd14f76bf28162607ff4254807e2948253eb5b46f5bb643b"
+    ),
+    "cnroberta_int8_dynamic.onnx": (
+        "24c36d383779213cad628a3f930941c451ceb7c85763cb6579fc12e6fa3b9284"
+    ),
+}
+
 
 def download_cnroberta_int8(dir, download_url=None):
     """下载 CNRoberta INT8 Dynamic ONNX 模型"""
@@ -304,13 +426,20 @@ def download_cnroberta_int8(dir, download_url=None):
     for filename in files_to_download:
         url = download_url % filename
         filepath = Path(dir) / filename
-        
-        if os.path.exists(filepath):
+
+        expected_sha256 = _CNROBERTA_INT8_SHA256[filename]
+        if filepath.exists() and _file_matches_sha256(filepath, expected_sha256):
             logging.info(f"文件已存在，跳过: {filepath}")
             continue
+        if filepath.exists():
+            logging.warning(f"文件校验失败，重新下载: {filepath}")
         
         logging.info(f"正在下载: {filename}")
-        if not download_file(url, filepath):
+        if not download_file(
+            url,
+            filepath,
+            expected_sha256=expected_sha256,
+        ):
             raise RuntimeError(f"Failed to download {filename}")
     
     logging.info(f"CNRoberta INT8 ONNX 模型下载完成: {dir}")
