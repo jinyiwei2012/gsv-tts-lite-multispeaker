@@ -57,6 +57,7 @@ class TTS:
         always_load_cnhubert: bool = False,
         always_load_sv: bool = False,
         auto_bert: bool = True,
+        ensure_default_model_files: bool = True,
     ):
         """
         Initializes GSV TTS engine.
@@ -73,6 +74,7 @@ class TTS:
             use_jieba_fast (bool): Whether to use jieba-fast for faster Chinese text segmentation. `jieba-fast` needs to be installed.
             always_load_cnhubert (bool): Whether to keep the CNHubert model loaded in VRAM. Set to True to accelerate Voice Conversion.
             always_load_sv (bool): Whether to keep the Speaker Verification model loaded in VRAM. Set to True to accelerate Speaker Verification.
+            ensure_default_model_files (bool): Whether to download and verify the default GPT and SoVITS checkpoints at initialization.
         """
 
         self.tts_config = Config()
@@ -122,7 +124,8 @@ class TTS:
         self.default_sovits_path = Path(self.models_dir) / "s2Gv2ProPlus.pth"
 
         check_pretrained_models(self.models_dir)
-        ensure_default_models(self.models_dir)
+        if ensure_default_model_files:
+            ensure_default_models(self.models_dir)
 
         self._bert_loaded = False
 

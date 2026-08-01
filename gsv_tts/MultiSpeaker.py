@@ -145,6 +145,9 @@ class MultiSpeakerTTS:
             "dtype": dtype,
             "use_flash_attn": use_flash_attn,
             "use_bert": use_bert,
+            "ensure_default_model_files": (
+                base_gpt_path is None or base_sovits_path is None
+            ),
         }
         if gpt_cache is not None:
             tts_kwargs["gpt_cache"] = gpt_cache
