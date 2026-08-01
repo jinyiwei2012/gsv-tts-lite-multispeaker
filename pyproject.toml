@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gsv-tts-lite"
+name = "gsv-tts-lite-multispeaker"
 version = "0.4.7"
 authors = [
   { name="mahir0", email="2370950583@qq.com" },
 ]
-description = "A high-performance inference engine specifically designed for the GPT-SoVITS text-to-speech model"
+description = "Standalone MultiSpeakerTTS shared-backbone inference engine for GPT-SoVITS"
 readme = "README.md"
 requires-python = ">=3.10"
 classifiers = [
@@ -39,7 +39,7 @@ dependencies = [
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/chinokikiss/GSV-TTS-Lite"
+"Homepage" = "https://github.com/jinyiwei2012/gsv-tts-lite-multispeaker"
 
 [tool.setuptools.packages.find]
 include = ["gsv_tts*"]
