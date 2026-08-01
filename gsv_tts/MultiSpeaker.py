@@ -874,9 +874,11 @@ class MultiSpeakerTTS:
             for speaker, items in groups.items():
                 orig_indices = [idx for idx, _ in items]
                 texts = [text for _, text in items]
+                weights = self._require_speaker(speaker)
 
-                if has_external_prompts:
-                    # External prompt override → per-text fallback
+                if has_external_prompts or weights.is_full_model:
+                    # Full-model speakers and external prompts use the proven
+                    # per-text path instead of the shared-backbone batch path.
                     for i, orig_idx in enumerate(orig_indices):
                         pp = (
                             prompt_audio_paths
@@ -910,7 +912,6 @@ class MultiSpeakerTTS:
                         )
                 else:
                     # Use cached prompt → true GPU batch
-                    self._require_speaker(speaker)
                     with self._activate_shared_models(speaker) as (
                         spk_key,
                         prompt_key,
