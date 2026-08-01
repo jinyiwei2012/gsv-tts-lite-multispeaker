@@ -1642,8 +1642,9 @@ class TTS:
             *spk_audio_list (str): Variable number of paths to speaker audio files to remove from cache.
         """
         for spk_audio in spk_audio_list:
-            if spk_audio in self.spk_audio_cache:
-                del self.spk_audio_cache[spk_audio]
+            removed = self.spk_audio_cache.pop(spk_audio, None)
+            self._spk_audio_stat.pop(spk_audio, None)
+            if removed is not None:
                 logging.info(f'Deleted speaker audio from cache: {spk_audio}')
             else:
                 logging.warning(f'Speaker audio {spk_audio} not found in cache.')
@@ -1656,8 +1657,9 @@ class TTS:
             *prompt_audio_list (str): Variable number of paths to prompt audio files to remove from cache.
         """
         for prompt_audio in prompt_audio_list:
-            if prompt_audio in self.prompt_audio_cache:
-                del self.prompt_audio_cache[prompt_audio]
+            removed = self.prompt_audio_cache.pop(prompt_audio, None)
+            self._prompt_audio_stat.pop(prompt_audio, None)
+            if removed is not None:
                 logging.info(f'Deleted prompt audio from cache: {prompt_audio}')
             else:
                 logging.warning(f'Prompt audio {prompt_audio} not found in cache.')
