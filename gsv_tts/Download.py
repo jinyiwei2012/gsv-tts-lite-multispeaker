@@ -138,6 +138,13 @@ def download_file(url, filename, timeout=_DEFAULT_TIMEOUT, expected_sha256=None)
     partial_path = None
     response = None
     try:
+        if expected_sha256 is not None:
+            expected_sha256 = expected_sha256.lower()
+            if len(expected_sha256) != 64 or any(
+                char not in "0123456789abcdef" for char in expected_sha256
+            ):
+                raise ValueError("expected_sha256 must be a 64-character hex digest")
+
         response = requests.get(url, stream=True, timeout=timeout)
         response.raise_for_status()
         try:
@@ -149,13 +156,6 @@ def download_file(url, filename, timeout=_DEFAULT_TIMEOUT, expected_sha256=None)
                 f"download size is outside the allowed range: "
                 f"{total_size_in_bytes} bytes"
             )
-
-        if expected_sha256 is not None:
-            expected_sha256 = expected_sha256.lower()
-            if len(expected_sha256) != 64 or any(
-                char not in "0123456789abcdef" for char in expected_sha256
-            ):
-                raise ValueError("expected_sha256 must be a 64-character hex digest")
 
         target.parent.mkdir(parents=True, exist_ok=True)
         digest = sha256()
@@ -494,16 +494,19 @@ def download_cnroberta_int8(dir, download_url=None):
     for filename in files_to_download:
         url = download_url % filename
         filepath = Path(dir) / filename
-        
-        if os.path.exists(filepath):
+
+        expected_sha256 = _CNROBERTA_INT8_SHA256[filename]
+        if filepath.exists() and _file_matches_sha256(filepath, expected_sha256):
             logging.info(f"文件已存在，跳过: {filepath}")
             continue
+        if filepath.exists():
+            logging.warning(f"文件校验失败，重新下载: {filepath}")
         
         logging.info(f"正在下载: {filename}")
         if not download_file(
             url,
             filepath,
-            expected_sha256=_CNROBERTA_INT8_SHA256[filename],
+            expected_sha256=expected_sha256,
         ):
             raise RuntimeError(f"Failed to download {filename}")
     

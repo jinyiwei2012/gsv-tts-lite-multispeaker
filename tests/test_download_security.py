@@ -82,6 +82,22 @@ def test_checksum_failure_preserves_existing_target(monkeypatch):
         assert target.read_bytes() == b"known-good"
 
 
+def test_invalid_checksum_is_rejected_before_request(monkeypatch):
+    module = importlib.import_module("gsv_tts.Download")
+
+    def unexpected_request(*args, **kwargs):
+        raise AssertionError("invalid manifest digest triggered a request")
+
+    monkeypatch.setattr(module.requests, "get", unexpected_request)
+
+    with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+        assert not download_file(
+            "https://example.test/model.bin",
+            Path(directory) / "model.bin",
+            expected_sha256="invalid",
+        )
+
+
 def test_download_size_limit_applies_without_content_length(monkeypatch):
     module = importlib.import_module("gsv_tts.Download")
     response = Response(b"oversized")
@@ -190,7 +206,7 @@ def test_download_model_requires_a_trusted_hash():
             )
 
 
-def test_cnroberta_downloads_pass_manifest_hashes(monkeypatch):
+def test_cnroberta_downloads_verify_existing_files_and_manifest(monkeypatch):
     module = importlib.import_module("gsv_tts.Download")
     calls = []
 
@@ -200,6 +216,8 @@ def test_cnroberta_downloads_pass_manifest_hashes(monkeypatch):
 
     monkeypatch.setattr(module, "download_file", download)
     with tempfile.TemporaryDirectory(dir=Path.cwd()) as directory:
+        corrupt = Path(directory) / "config.json"
+        corrupt.write_bytes(b"corrupt")
         module.download_cnroberta_int8(
             directory,
             download_url=module.cnroberta_int8_huggingface_base_url,
