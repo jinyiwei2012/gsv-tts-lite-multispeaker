@@ -377,17 +377,47 @@ class MultiSpeakerTTS:
 
     def add_speaker(self, spk: SpeakerConfig):
         """Add a new speaker at runtime."""
-        if spk.name in self._speakers:
-            raise ValueError(f"Speaker '{spk.name}' already exists.")
-        self._add_speaker(spk)
+        with self._tts._infer_lock:
+            if spk.name in self._speakers:
+                raise ValueError(f"Speaker '{spk.name}' already exists.")
+            self._add_speaker(spk)
 
     def remove_speaker(self, name: str):
         """Remove a speaker at runtime."""
-        if name not in self._speakers:
-            raise ValueError(f"Speaker '{name}' not found.")
-        del self._speakers[name]
-        if self._active_speaker == name:
-            self._active_speaker = None
+        with self._tts._infer_lock:
+            if name not in self._speakers:
+                raise ValueError(f"Speaker '{name}' not found.")
+            weights = self._speakers.pop(name)
+
+            if weights.is_full_model:
+                gpt_in_use = any(
+                    w.is_full_model and w.gpt_model_key == weights.gpt_model_key
+                    for w in self._speakers.values()
+                )
+                sovits_in_use = any(
+                    w.is_full_model and w.sovits_model_key == weights.sovits_model_key
+                    for w in self._speakers.values()
+                )
+                if weights.gpt_model_key is not None and not gpt_in_use:
+                    self._tts.unload_gpt_model(weights.gpt_model_key)
+                if weights.sovits_model_key is not None and not sovits_in_use:
+                    self._tts.unload_sovits_model(weights.sovits_model_key)
+
+            self._tts.del_spk_audio(self._spk_cache_key(name))
+            self._tts.del_prompt_audio(self._prompt_cache_key(name))
+            if weights.spk_audio_path is not None and not any(
+                w.spk_audio_path == weights.spk_audio_path
+                for w in self._speakers.values()
+            ):
+                self._tts.del_spk_audio(weights.spk_audio_path)
+            if weights.prompt_audio_path is not None and not any(
+                w.prompt_audio_path == weights.prompt_audio_path
+                for w in self._speakers.values()
+            ):
+                self._tts.del_prompt_audio(weights.prompt_audio_path)
+
+            if self._active_speaker == name:
+                self._active_speaker = None
         logger.info(f"Removed speaker: {name}")
 
     @property
