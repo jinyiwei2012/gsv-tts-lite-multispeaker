@@ -448,17 +448,47 @@ class MultiSpeakerTTS:
 
     def add_speaker(self, spk: SpeakerConfig):
         """Add a new speaker at runtime."""
-        if spk.name in self._speakers:
-            raise ValueError(f"Speaker '{spk.name}' already exists.")
-        self._add_speaker(spk)
+        with self._tts._infer_lock:
+            if spk.name in self._speakers:
+                raise ValueError(f"Speaker '{spk.name}' already exists.")
+            self._add_speaker(spk)
 
     def remove_speaker(self, name: str):
         """Remove a speaker at runtime."""
-        if name not in self._speakers:
-            raise ValueError(f"Speaker '{name}' not found.")
-        del self._speakers[name]
-        if self._active_speaker == name:
-            self._active_speaker = None
+        with self._tts._infer_lock:
+            if name not in self._speakers:
+                raise ValueError(f"Speaker '{name}' not found.")
+            weights = self._speakers.pop(name)
+
+            if weights.is_full_model:
+                gpt_in_use = any(
+                    w.is_full_model and w.gpt_model_key == weights.gpt_model_key
+                    for w in self._speakers.values()
+                )
+                sovits_in_use = any(
+                    w.is_full_model and w.sovits_model_key == weights.sovits_model_key
+                    for w in self._speakers.values()
+                )
+                if weights.gpt_model_key is not None and not gpt_in_use:
+                    self._tts.unload_gpt_model(weights.gpt_model_key)
+                if weights.sovits_model_key is not None and not sovits_in_use:
+                    self._tts.unload_sovits_model(weights.sovits_model_key)
+
+            self._tts.del_spk_audio(self._spk_cache_key(name))
+            self._tts.del_prompt_audio(self._prompt_cache_key(name))
+            if weights.spk_audio_path is not None and not any(
+                w.spk_audio_path == weights.spk_audio_path
+                for w in self._speakers.values()
+            ):
+                self._tts.del_spk_audio(weights.spk_audio_path)
+            if weights.prompt_audio_path is not None and not any(
+                w.prompt_audio_path == weights.prompt_audio_path
+                for w in self._speakers.values()
+            ):
+                self._tts.del_prompt_audio(weights.prompt_audio_path)
+
+            if self._active_speaker == name:
+                self._active_speaker = None
         logger.info(f"Removed speaker: {name}")
 
     @property
@@ -774,45 +804,55 @@ class MultiSpeakerTTS:
             KeyError: If no speakers are registered.
             ValueError: If no speaker exceeds ``min_similarity``.
         """
-        if not self._speakers:
-            raise KeyError(
-                "No speakers registered — add speakers before calling infer_auto"
-            )
-
         tts = self._tts
-        first = next(iter(self._speakers))
-        with self._activate_shared_models(first, require_prompt=False):
-            if _SHARED_SOVITS_KEY not in tts.sovits_models:
-                tts.sovits_models[_SHARED_SOVITS_KEY] = self._shared_sovits
-            model = tts.sovits_models[_SHARED_SOVITS_KEY]
-            if tts.sv_model is None:
-                tts.sv_model = ERes2Net(tts.sv_path, tts.tts_config)
-            _, audio_tensor = tts._get_spec(model.hps, speaker_audio)
-            query_emb = tts.sv_model.compute_embedding3(audio_tensor)
-
-            best_name, best_sim = None, -1.0
-            for name, w in self._speakers.items():
-                tts.cache_spk_audio(w.spk_audio_path, sovits_model=_SHARED_SOVITS_KEY)
-                sv_emb = tts.spk_audio_cache[w.spk_audio_path].get("sv_emb")
-                if sv_emb is None:
-                    continue
-                sim = float(
-                    torch.cosine_similarity(query_emb, sv_emb, dim=-1, eps=1e-6).item()
+        with tts._infer_lock:
+            if not self._speakers:
+                raise KeyError(
+                    "No speakers registered — add speakers before calling infer_auto"
                 )
-                if sim > best_sim:
-                    best_sim, best_name = sim, name
+            first = next(iter(self._speakers))
+            with self._activate_shared_models(first, require_prompt=False):
+                if _SHARED_SOVITS_KEY not in tts.sovits_models:
+                    tts.sovits_models[_SHARED_SOVITS_KEY] = self._shared_sovits
+                model = tts.sovits_models[_SHARED_SOVITS_KEY]
+                if tts.sv_model is None:
+                    tts.sv_model = ERes2Net(tts.sv_path, tts.tts_config)
+                _, audio_tensor = tts._get_spec(model.hps, speaker_audio)
+                query_emb = tts.sv_model.compute_embedding3(audio_tensor)
 
-        if best_name is None:
-            raise ValueError(
-                "Could not compute speaker embeddings for any registered speaker"
+                best_name, best_sim = None, -1.0
+                for name, w in self._speakers.items():
+                    tts.cache_spk_audio(
+                        w.spk_audio_path,
+                        sovits_model=_SHARED_SOVITS_KEY,
+                    )
+                    sv_emb = tts.spk_audio_cache[w.spk_audio_path].get("sv_emb")
+                    if sv_emb is None:
+                        continue
+                    sim = float(
+                        torch.cosine_similarity(
+                            query_emb,
+                            sv_emb,
+                            dim=-1,
+                            eps=1e-6,
+                        ).item()
+                    )
+                    if sim > best_sim:
+                        best_sim, best_name = sim, name
+
+            if best_name is None:
+                raise ValueError(
+                    "Could not compute speaker embeddings for any registered speaker"
+                )
+            if best_sim < min_similarity:
+                raise ValueError(
+                    f"Best speaker '{best_name}' similarity {best_sim:.3f} "
+                    f"is below min_similarity {min_similarity}"
+                )
+            logger.info(
+                f"Auto-routed to speaker '{best_name}' (similarity {best_sim:.3f})"
             )
-        if best_sim < min_similarity:
-            raise ValueError(
-                f"Best speaker '{best_name}' similarity {best_sim:.3f} "
-                f"is below min_similarity {min_similarity}"
-            )
-        logger.info(f"Auto-routed to speaker '{best_name}' (similarity {best_sim:.3f})")
-        return best_name, self.infer(best_name, text, **kwargs)
+            return best_name, self.infer(best_name, text, **kwargs)
 
     def infer_batched(
         self,
